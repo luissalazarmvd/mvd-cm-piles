@@ -13,34 +13,21 @@ export default function Home() {
 
     script.onload = () => {
       // @ts-ignore
-new window.TradingView.widget({
-  container_id: "tradingview-widget",
-
-  // Activo principal (velas)
-  symbol: "OANDA:XAUUSD",
-
-  // Comparación (línea)
-  compare_symbols: [
-    {
-      symbol: "OANDA:XAGUSD",
-      position: "SameScale", // misma escala (como tu screenshot)
-    },
-  ],
-
-  interval: "D",
-  theme: "dark",
-  style: "1",
-  locale: "en",
-  autosize: true,
-
-  allow_symbol_change: true,
-
-  studies: [
-    "MACD@tv-basicstudies",
-    "RSI@tv-basicstudies",
-  ],
-});
-
+      new window.TradingView.widget({
+        container_id: "tradingview-widget",
+        symbol: "OANDA:XAUUSD",
+        interval: "D",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        width: "100%",
+        height: 500,
+        allow_symbol_change: true,
+        studies: [
+          "MACD@tv-basicstudies",
+          "RSI@tv-basicstudies",
+        ],
+      });
     };
 
     document.body.appendChild(script);

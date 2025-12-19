@@ -15,9 +15,7 @@ export default function Home() {
       if (localStorage.getItem("mvd_auth") === "ok") {
         setAuthorized(true);
       }
-    } catch {
-      // por si algún browser bloquea storage
-    }
+    } catch {}
   }, []);
 
   // 2) Cargar TradingView SOLO cuando ya está autorizado
@@ -27,22 +25,30 @@ export default function Home() {
     const containerId = "tradingview-widget";
 
     const initWidget = () => {
+      const el = document.getElementById(containerId);
       // @ts-ignore
-      if (!window.TradingView || !document.getElementById(containerId)) return;
+      if (!window.TradingView || !el) return;
+
+      // Evita duplicados si React re-renderiza
+      el.innerHTML = "";
 
       // @ts-ignore
       new window.TradingView.widget({
         container_id: containerId,
+
+        // Principal
         symbol: "OANDA:XAUUSD",
-        compare_symbols: [
-          { symbol: "OANDA:XAGUSD", position: "SameScale" },
-        ],
+
+        // Comparación por default
+        compare_symbols: [{ symbol: "OANDA:XAGUSD", position: "SameScale" }],
+
         interval: "D",
         theme: "dark",
         style: "1",
         locale: "en",
         width: "100%",
         height: 700,
+
         allow_symbol_change: true,
         studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
       });

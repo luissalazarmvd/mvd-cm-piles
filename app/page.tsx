@@ -9,7 +9,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
 
-
+  // 1) Mantener sesión (solo corre en cliente)
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") {
@@ -18,7 +18,7 @@ export default function Home() {
     } catch {}
   }, []);
 
-
+  // 2) Cargar TradingView SOLO cuando ya está autorizado
   useEffect(() => {
     if (!authorized) return;
 
@@ -26,20 +26,20 @@ export default function Home() {
 
     const initWidget = () => {
       const el = document.getElementById(containerId);
-
+      // @ts-ignore
       if (!window.TradingView || !el) return;
 
-
+      // Evita duplicados si React re-renderiza
       el.innerHTML = "";
 
- 
+      // @ts-ignore
       new window.TradingView.widget({
         container_id: containerId,
 
-
+        // Principal
         symbol: "OANDA:XAUUSD",
 
-
+        // Comparación por default
         compare_symbols: [{ symbol: "OANDA:XAGUSD", position: "SameScale" }],
 
         interval: "D",
@@ -54,13 +54,13 @@ export default function Home() {
       });
     };
 
-
+    // Si ya existe el script, solo inicializa
     if (document.getElementById("tradingview-script")) {
       initWidget();
       return;
     }
 
-
+    // Si no existe, lo creas
     const script = document.createElement("script");
     script.id = "tradingview-script";
     script.src = "https://s3.tradingview.com/tv.js";
@@ -91,7 +91,7 @@ export default function Home() {
     setError("");
   };
 
-
+  // LOGIN UI
   if (!authorized) {
     return (
       <main
@@ -165,7 +165,7 @@ export default function Home() {
     );
   }
 
-
+  // DASHBOARD UI
   return (
     <main
       style={{

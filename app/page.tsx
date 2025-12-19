@@ -9,66 +9,12 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
 
-  // 1) Mantener sesión (solo corre en cliente)
+  // 1) Mantener sesión
   useEffect(() => {
     try {
-      if (localStorage.getItem("mvd_auth") === "ok") {
-        setAuthorized(true);
-      }
+      if (localStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
     } catch {}
   }, []);
-
-  // 2) Cargar TradingView SOLO cuando ya está autorizado
-  useEffect(() => {
-    if (!authorized) return;
-
-    const containerId = "tradingview-widget";
-
-    const initWidget = () => {
-      const el = document.getElementById(containerId);
-      // @ts-ignore
-      if (!window.TradingView || !el) return;
-
-      // Evita duplicados si React re-renderiza
-      el.innerHTML = "";
-
-      // @ts-ignore
-      new window.TradingView.widget({
-        container_id: containerId,
-
-        // Principal
-        symbol: "OANDA:XAUUSD",
-
-        // Comparación por default
-        compare_symbols: [{ symbol: "OANDA:XAGUSD", position: "SameScale" }],
-
-        interval: "D",
-        theme: "dark",
-        style: "1",
-        locale: "en",
-        width: "100%",
-        height: 700,
-
-        allow_symbol_change: true,
-        studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
-      });
-    };
-
-    // Si ya existe el script, solo inicializa
-    if (document.getElementById("tradingview-script")) {
-      initWidget();
-      return;
-    }
-
-    // Si no existe, lo creas
-    const script = document.createElement("script");
-    script.id = "tradingview-script";
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-    script.onload = initWidget;
-
-    document.body.appendChild(script);
-  }, [authorized]);
 
   const handleLogin = () => {
     if (input === PASSWORD) {
@@ -90,6 +36,47 @@ export default function Home() {
     setInput("");
     setError("");
   };
+
+  // 2) Inyectar TradingView embed (XAUUSD + XAGUSD)
+  useEffect(() => {
+    if (!authorized) return;
+
+    const containerId = "tv-advanced-widget";
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Limpia por si React re-renderiza
+    container.innerHTML = "";
+
+    const script = document.createElement("script");
+    script.src =
+      "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+
+    // IMPORTANTE: aquí va la comparación por default (symbols)
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      theme: "dark",
+      locale: "en",
+
+      // Lista de símbolos (esto sí deja la comparación por default)
+      symbols: [
+        ["Oro", "OANDA:XAUUSD|1D"],
+        ["Plata", "OANDA:XAGUSD|1D"],
+      ],
+
+      interval: "D",
+      hide_top_toolbar: false,
+      hide_legend: false,
+      allow_symbol_change: true,
+      save_image: true,
+      calendar: false,
+      support_host: "https://www.tradingview.com",
+      studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
+    });
+
+    container.appendChild(script);
+  }, [authorized]);
 
   // LOGIN UI
   if (!authorized) {
@@ -231,7 +218,6 @@ export default function Home() {
         <h2 style={{ marginBottom: 8 }}>Mercado – Oro / Índices</h2>
 
         <div
-          id="tradingview-widget"
           style={{
             width: "100%",
             height: 700,
@@ -239,7 +225,12 @@ export default function Home() {
             overflow: "hidden",
             background: "#000",
           }}
-        />
+        >
+          <div
+            id="tv-advanced-widget"
+            style={{ width: "100%", height: "100%" }}
+          />
+        </div>
 
         <a
           href="https://www.tradingview.com/chart/?symbol=OANDA:XAUUSD"

@@ -9,25 +9,83 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
 
-  // Mantener sesión
+  // 1) Mantener sesión (solo corre en cliente)
   useEffect(() => {
-    if (localStorage.getItem("mvd_auth") === "ok") {
-      setAuthorized(true);
+    try {
+      if (localStorage.getItem("mvd_auth") === "ok") {
+        setAuthorized(true);
+      }
+    } catch {
+      // por si algún browser bloquea storage
     }
   }, []);
 
+  // 2) Cargar TradingView SOLO cuando ya está autorizado
+  useEffect(() => {
+    if (!authorized) return;
+
+    const containerId = "tradingview-widget";
+
+    const initWidget = () => {
+      // @ts-ignore
+      if (!window.TradingView || !document.getElementById(containerId)) return;
+
+      // @ts-ignore
+      new window.TradingView.widget({
+        container_id: containerId,
+        symbol: "OANDA:XAUUSD",
+        compare_symbols: [
+          { symbol: "OANDA:XAGUSD", position: "SameScale" },
+        ],
+        interval: "D",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        width: "100%",
+        height: 700,
+        allow_symbol_change: true,
+        studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
+      });
+    };
+
+    // Si ya existe el script, solo inicializa
+    if (document.getElementById("tradingview-script")) {
+      initWidget();
+      return;
+    }
+
+    // Si no existe, lo creas
+    const script = document.createElement("script");
+    script.id = "tradingview-script";
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = initWidget;
+
+    document.body.appendChild(script);
+  }, [authorized]);
+
   const handleLogin = () => {
     if (input === PASSWORD) {
-      localStorage.setItem("mvd_auth", "ok");
+      try {
+        localStorage.setItem("mvd_auth", "ok");
+      } catch {}
       setAuthorized(true);
+      setError("");
     } else {
       setError("Contraseña incorrecta");
     }
   };
 
-  /* =====================
-     LOGIN
-  ====================== */
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem("mvd_auth");
+    } catch {}
+    setAuthorized(false);
+    setInput("");
+    setError("");
+  };
+
+  // LOGIN UI
   if (!authorized) {
     return (
       <main
@@ -39,6 +97,7 @@ export default function Home() {
           alignItems: "center",
           fontFamily: "Arial, sans-serif",
           color: "white",
+          padding: 16,
         }}
       >
         <div
@@ -46,7 +105,7 @@ export default function Home() {
             background: "#004F86",
             padding: 32,
             borderRadius: 8,
-            width: 320,
+            width: 340,
             textAlign: "center",
           }}
         >
@@ -63,12 +122,16 @@ export default function Home() {
             placeholder="Contraseña"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLogin();
+            }}
             style={{
               width: "100%",
               padding: 10,
               borderRadius: 4,
               border: "none",
               marginBottom: 12,
+              outline: "none",
             }}
           />
 
@@ -96,47 +159,7 @@ export default function Home() {
     );
   }
 
-  /* =====================
-     TRADINGVIEW
-  ====================== */
-  useEffect(() => {
-    if (document.getElementById("tradingview-script")) return;
-
-    const script = document.createElement("script");
-    script.id = "tradingview-script";
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-
-    script.onload = () => {
-      // @ts-ignore
-      new window.TradingView.widget({
-        container_id: "tradingview-widget",
-        symbol: "OANDA:XAUUSD",
-        compare_symbols: [
-          {
-            symbol: "OANDA:XAGUSD",
-            position: "SameScale",
-          },
-        ],
-        interval: "D",
-        theme: "dark",
-        style: "1",
-        locale: "en",
-        autosize: true,
-        allow_symbol_change: true,
-        studies: [
-          "MACD@tv-basicstudies",
-          "RSI@tv-basicstudies",
-        ],
-      });
-    };
-
-    document.body.appendChild(script);
-  }, []);
-
-  /* =====================
-     DASHBOARD
-  ====================== */
+  // DASHBOARD UI
   return (
     <main
       style={{
@@ -147,16 +170,37 @@ export default function Home() {
         minHeight: "100vh",
       }}
     >
-      {/* LOGO */}
-      <img
-        src="/logo_mvd.png"
-        alt="MVD"
-        style={{ height: 48, marginBottom: 16 }}
-      />
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <img src="/logo_mvd.png" alt="MVD" style={{ height: 48 }} />
+          <h1 style={{ margin: 0 }}>MVD – ML Dashboard (Market Data)</h1>
+        </div>
 
-      <h1 style={{ marginBottom: 12 }}>
-        MVD – ML Dashboard (Market Data)
-      </h1>
+        <button
+          onClick={handleLogout}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 6,
+            border: "none",
+            background: "#A7D8FF",
+            color: "#003A63",
+            fontWeight: "bold",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Cerrar sesión
+        </button>
+      </div>
 
       {/* Power BI */}
       <section style={{ marginBottom: 32 }}>
@@ -184,7 +228,7 @@ export default function Home() {
           id="tradingview-widget"
           style={{
             width: "100%",
-            height: "70vh",
+            height: 700,
             borderRadius: 8,
             overflow: "hidden",
             background: "#000",

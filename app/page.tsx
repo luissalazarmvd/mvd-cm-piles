@@ -16,7 +16,7 @@ export default function Home() {
       // @ts-ignore
       new window.TradingView.widget({
         container_id: "tradingview-widget",
-        symbol: "COMEX:GC1!",
+        symbol: "OANDA:XAUUSD",
         interval: "D",
         theme: "dark",
         style: "1",

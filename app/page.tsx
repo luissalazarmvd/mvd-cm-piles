@@ -21,7 +21,7 @@ export default function Home() {
         style: "1",
         locale: "en",
         width: "100%",
-        height: 500,
+        height: "70vh",
         allow_symbol_change: true,
         studies: [
           "MACD@tv-basicstudies",

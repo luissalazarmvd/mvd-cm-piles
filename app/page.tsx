@@ -4,7 +4,6 @@ import { useEffect } from "react";
 
 export default function Home() {
   useEffect(() => {
-    // Evita cargar el script más de una vez
     if (document.getElementById("tradingview-script")) return;
 
     const script = document.createElement("script");
@@ -35,13 +34,28 @@ export default function Home() {
   }, []);
 
   return (
-    <main style={{ padding: 16, fontFamily: "Arial, sans-serif" }}>
+    <main
+      style={{
+        padding: 16,
+        fontFamily: "Arial, sans-serif",
+        backgroundColor: "#0067AC",
+        color: "white",
+        minHeight: "100vh",
+      }}
+    >
+      {/* LOGO */}
+      <img
+        src="/logo_mvd.png"
+        alt="MVD"
+        style={{ height: 48, marginBottom: 16 }}
+      />
+
       <h1 style={{ marginBottom: 12 }}>
         MVD – ML Dashboard (Market Data)
       </h1>
 
       {/* Power BI */}
-      <section style={{ marginBottom: 24 }}>
+      <section style={{ marginBottom: 32 }}>
         <h2 style={{ marginBottom: 8 }}>Power BI – Señales y ML</h2>
 
         <iframe
@@ -52,6 +66,7 @@ export default function Home() {
             height: "70vh",
             border: "none",
             borderRadius: 8,
+            background: "white",
           }}
           allowFullScreen
         />
@@ -60,7 +75,27 @@ export default function Home() {
       {/* TradingView */}
       <section>
         <h2 style={{ marginBottom: 8 }}>Mercado – Oro / Índices</h2>
-        <div id="tradingview-widget" />
+
+        <div
+          id="tradingview-widget"
+          style={{ borderRadius: 8, overflow: "hidden" }}
+        />
+
+        {/* Botón recomendado */}
+        <a
+          href="https://www.tradingview.com/chart/?symbol=OANDA:XAUUSD"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: "inline-block",
+            marginTop: 10,
+            color: "#A7D8FF",
+            fontSize: 14,
+            textDecoration: "none",
+          }}
+        >
+          Abrir en TradingView (análisis completo)
+        </a>
       </section>
     </main>
   );

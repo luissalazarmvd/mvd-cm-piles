@@ -227,7 +227,7 @@ export default function Home() {
       </section>
 
       {/* TradingView */}
-      <section>
+      <section style={{ marginBottom: 28 }}>
         <h2 style={{ marginBottom: 8 }}>Mercado – Oro / Índices</h2>
 
         <div
@@ -255,6 +255,94 @@ export default function Home() {
         >
           Abrir en TradingView (análisis completo)
         </a>
+      </section>
+
+      {/* Matriz señal - confianza - acción */}
+      <section style={{ marginTop: 18 }}>
+        <h2 style={{ marginBottom: 10 }}>Matriz señal – confianza – acción</h2>
+
+        <div
+          style={{
+            width: "100%",
+            borderRadius: 8,
+            overflow: "hidden",
+            border: "2px solid #c69214",
+            background: "#0067ac",
+          }}
+        >
+          {/* Header row */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 170px 1fr 1.2fr",
+              gap: 0,
+              borderBottom: "2px solid #c69214",
+              fontWeight: 700,
+              padding: "12px 12px",
+            }}
+          >
+            <div>Señal</div>
+            <div>Nivel de Confianza</div>
+            <div>Interpretación</div>
+            <div>Acción recomendada</div>
+          </div>
+
+          {/* Row -1 */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 170px 1fr 1.2fr",
+              gap: 0,
+              padding: "14px 12px",
+              borderBottom: "1px solid #c69214",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>-1</div>
+            <div style={{ fontWeight: 700 }}>{">"}60%</div>
+            <div>Mercado desfavorable / riesgo elevado</div>
+            <div>Aumentar castigos de negociación y reducir exposición</div>
+          </div>
+
+          {/* Row 0 */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 170px 1fr 1.2fr",
+              gap: 0,
+              padding: "14px 12px",
+              borderBottom: "1px solid #c69214",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>0</div>
+            <div style={{ fontWeight: 700 }}>-</div>
+            <div>Sin señal clara</div>
+            <div>Mantener condiciones estándar</div>
+          </div>
+
+          {/* Row 1 */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 170px 1fr 1.2fr",
+              gap: 0,
+              padding: "14px 12px",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>1</div>
+            <div style={{ fontWeight: 700 }}>{">"}60%</div>
+            <div>Mercado favorable / riesgo controlado</div>
+            <div>Ofrecer condiciones más competitivas para captar volumen</div>
+          </div>
+        </div>
+
+        {/* Nota opcional (chiquita) */}
+        <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
+          Nota: el umbral de confianza se interpreta como probabilidad mínima
+          recomendada para ejecutar la acción.
+        </p>
       </section>
     </main>
   );

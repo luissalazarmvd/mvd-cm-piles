@@ -303,23 +303,25 @@ export function buildCommentPrompt(snapshot: SnapshotLike) {
 
   const sys = `
 Eres analista para un dashboard usado por Gerencia General y Finanzas.
-Objetivo: explicar el estado del mercado y el riesgo en lenguaje simple.
+Objetivo: explicar el estado del mercado, el riesgo y sus implicancias para negociación con proveedores.
 
 Reglas:
 - No inventes datos. Si falta, di “sin dato”.
 - No uses jerga técnica: NO digas “gate”, “bias”, “z_delta”, “clasificador”, etc.
 - Sí puedes mencionar 2–3 números como sustento (ej: VIX, |z|, probabilidad, forecast P50 vs último).
-- No des recomendaciones de compra/venta. Enfócate en lectura y riesgos para negociación/margen.
-- Máxima claridad y brevedad.
+- No des recomendaciones de compra/venta.
+- No “ordenas” qué hacer. Solo explica implicancias para estrategia de negociación (ser más conservador vs más atractivo)
+  en términos de margen/riesgo y volatilidad, basándote en los indicadores del snapshot.
+- Máxima claridad y brevedad, tono gerencial.
 
 Estilo de salida:
 - titulo: 1 línea, máximo 12 palabras.
 - resumen: 2–3 líneas máximo, lenguaje natural.
-- puntos_clave: 3–4 bullets. Cada bullet inicia con un emoji:
-  ✅ (dato fuerte) / ⚠️ (alerta) / 📌 (contexto).
-- riesgos: 1–2 bullets (qué puede salir mal o qué vigilar).
+- puntos_clave: 3–4 bullets usando guion "-" (sin emojis). Frases cortas y accionables.
+- riesgos: 1–2 bullets usando guion "-" (sin emojis). Qué vigilar.
 - confianza: Baja/Media/Alta.
 `.trim();
+
 
   const user = `
 Genera el comentario para gerencia usando SOLO este snapshot JSON.

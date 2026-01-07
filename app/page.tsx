@@ -4,10 +4,39 @@ import { useEffect, useState } from "react";
 
 const PASSWORD = "MVDML_123";
 
+type CommentJSON = {
+  headline: string;
+  bullets: string[];
+  interpretation: string;
+  risks: string[];
+  confidence: "Baja" | "Media" | "Alta";
+};
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
+
+  // Comentario IA
+  const [aiLoading, setAiLoading] = useState(true);
+  const [aiError, setAiError] = useState<string>("");
+  const [aiComment, setAiComment] = useState<CommentJSON | null>(null);
+
+  async function loadAIComment() {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const res = await fetch("/api/comment", { cache: "no-store" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j?.error || "Error");
+      setAiComment(j.comment);
+    } catch (e: any) {
+      setAiError(e?.message || "Error");
+      setAiComment(null);
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   // 1) Mantener sesión (solo corre en cliente)
   useEffect(() => {
@@ -17,6 +46,12 @@ export default function Home() {
       }
     } catch {}
   }, []);
+
+  // 1.1) Cargar comentario IA cuando está autorizado
+  useEffect(() => {
+    if (!authorized) return;
+    loadAIComment();
+  }, [authorized]);
 
   // 2) Cargar TradingView SOLO cuando ya está autorizado
   useEffect(() => {
@@ -209,7 +244,7 @@ export default function Home() {
       </div>
 
       {/* Power BI */}
-      <section style={{ marginBottom: 32 }}>
+      <section style={{ marginBottom: 18 }}>
         <h2 style={{ marginBottom: 8 }}>Power BI – Señales y ML</h2>
 
         <iframe
@@ -224,6 +259,91 @@ export default function Home() {
           }}
           allowFullScreen
         />
+      </section>
+
+      {/* Comentario IA */}
+      <section style={{ marginBottom: 28 }}>
+        <div
+          style={{
+            borderRadius: 8,
+            border: "2px solid #c69214",
+            background: "#004F86",
+            padding: 14,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              marginBottom: 10,
+            }}
+          >
+            <h2 style={{ margin: 0 }}>Comentario IA (Macro + Señal + Forecast)</h2>
+
+            <button
+              onClick={loadAIComment}
+              disabled={aiLoading}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "none",
+                background: "#A7D8FF",
+                color: "#003A63",
+                fontWeight: "bold",
+                cursor: aiLoading ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {aiLoading ? "Generando..." : "Actualizar"}
+            </button>
+          </div>
+
+          {aiError && (
+            <p style={{ color: "#FFD6D6", margin: 0 }}>
+              ❌ {aiError}
+            </p>
+          )}
+
+          {!aiError && aiLoading && (
+            <p style={{ margin: 0, color: "#D8EEFF" }}>
+              Generando comentario con IA…
+            </p>
+          )}
+
+          {!aiError && !aiLoading && aiComment && (
+            <div style={{ marginTop: 8 }}>
+              <h3 style={{ margin: "0 0 8px 0" }}>{aiComment.headline}</h3>
+
+              <ul style={{ margin: "0 0 10px 18px" }}>
+                {aiComment.bullets.map((b, i) => (
+                  <li key={i} style={{ marginBottom: 6 }}>
+                    {b}
+                  </li>
+                ))}
+              </ul>
+
+              <p style={{ margin: "0 0 8px 0" }}>
+                <b>Lectura:</b> {aiComment.interpretation}
+              </p>
+
+              <p style={{ margin: "0 0 8px 0" }}>
+                <b>Riesgos:</b> {aiComment.risks.join(" · ")}
+              </p>
+
+              <p style={{ margin: 0 }}>
+                <b>Confianza:</b> {aiComment.confidence}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
+          Nota: comentario automático basado en datos del modelo (z-score, señal,
+          probabilidad, VIX/DXY/Y10 y forecast de Au). No constituye recomendación
+          de inversión.
+        </p>
       </section>
 
       {/* TradingView */}

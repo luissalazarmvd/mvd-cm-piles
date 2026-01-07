@@ -315,41 +315,48 @@ export async function GET() {
       },
     });
 
-    const text = r.output_text?.trim();
+        const text = r.output_text?.trim();
     if (!text) throw new Error("OpenAI returned empty output_text");
 
     const raw = JSON.parse(text);
 
-    // ✅ Devuelve el formato simple (tu objetivo)
-const simple: ApiCommentSimple = toSimpleFromModel(raw);
+    // ✅ Formato simple (tu objetivo)
+    const simple: ApiCommentSimple = toSimpleFromModel(raw);
 
-// ✅ Deriva riesgos como array (para que el front pueda hacer .map sin romper)
-const risksArr =
-  (simple.riesgos ?? "")
-    .replace(/^Riesgos:\s*/i, "")
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 2);
+    // ✅ bullets legacy: si el modelo viejo manda puntos_clave, úsalo; si no, []
+    const bulletsArr =
+      Array.isArray((raw as any)?.puntos_clave)
+        ? (raw as any).puntos_clave.filter(Boolean).slice(0, 4)
+        : [];
 
-// ✅ Mantén el contrato anterior para que NO reviente el cliente si todavía hace .map
-const legacy: ApiCommentLegacy = {
-  headline: simple.titulo,
-  interpretation: simple.comentario,
-  bullets: [],           // SIEMPRE array
-  risks: risksArr,       // SIEMPRE array
-  confidence: simple.confianza,
-};
+    // ✅ risks legacy: siempre array (2 items máx)
+    // Si simple.riesgos viene como "Riesgos: a; b", lo convertimos a ["a","b"]
+    const risksArr =
+      (simple?.riesgos ?? "")
+        .replace(/^Riesgos:\s*/i, "")
+        .split(";")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 2);
 
-return NextResponse.json({
-  snapshot,
-  comment: legacy,        // <-- DEJA ESTO para que tu UI actual no se caiga
-  comment_simple: simple, // <-- nuevo formato (lo usas luego)
-});
-} catch (err: any) {
-  return NextResponse.json(
-    { error: err?.message ?? "Error desconocido" },
-    { status: 500 }
-  );
+    const legacy: ApiCommentLegacy = {
+      headline: simple.titulo,
+      interpretation: simple.comentario,
+      bullets: bulletsArr,         // SIEMPRE array
+      risks: risksArr,             // SIEMPRE array
+      confidence: simple.confianza,
+    };
+
+    return NextResponse.json({
+      snapshot,
+      comment: legacy,         // ✅ DEJA ESTO para que tu UI actual NO se caiga
+      comment_simple: simple,  // ✅ nuevo formato (lo usas luego)
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message ?? "Error desconocido" },
+      { status: 500 }
+    );
+  }
 }
-}
+

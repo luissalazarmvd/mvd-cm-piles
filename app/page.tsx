@@ -4,13 +4,23 @@ import { useEffect, useState } from "react";
 
 const PASSWORD = "MVDML_123";
 
-type CommentJSON = {
-  headline: string;
-  bullets: string[];
-  interpretation: string;
-  risks: string[];
-  confidence: "Baja" | "Media" | "Alta";
+type CommentLegacy = {
+  headline?: string;
+  bullets?: string[];
+  interpretation?: string;
+  risks?: string[];
+  confidence?: "Baja" | "Media" | "Alta" | string;
 };
+
+type CommentSimple = {
+  titulo?: string;
+  comentario?: string;
+  riesgos?: string; // "Riesgos: a; b"
+  confianza?: "Baja" | "Media" | "Alta" | string;
+};
+
+// el API puede devolver cualquiera
+type CommentJSON = CommentLegacy | CommentSimple;
 
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
@@ -29,7 +39,9 @@ export default function Home() {
       const res = await fetch("/api/comment", { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || "Error");
-      setAiComment(j.comment);
+
+      // Preferir el formato nuevo si existe; sino el legacy
+      setAiComment(j.comment_simple ?? j.comment ?? null);
     } catch (e: any) {
       setAiError(e?.message || "Error");
       setAiComment(null);
@@ -261,7 +273,7 @@ export default function Home() {
         />
       </section>
 
-      {/* Comentario IA */}
+      {/* Comentario */}
       <section style={{ marginBottom: 28 }}>
         <div
           style={{
@@ -280,7 +292,7 @@ export default function Home() {
               marginBottom: 10,
             }}
           >
-            <h2 style={{ margin: 0 }}>Comentario IA (Macro + Señal + Forecast)</h2>
+            <h2 style={{ margin: 0 }}>Comentario (Macro + Señal + Forecast)</h2>
 
             <button
               onClick={loadAIComment}
@@ -301,9 +313,7 @@ export default function Home() {
           </div>
 
           {aiError && (
-            <p style={{ color: "#FFD6D6", margin: 0 }}>
-              ❌ {aiError}
-            </p>
+            <p style={{ color: "#FFD6D6", margin: 0 }}>❌ {aiError}</p>
           )}
 
           {!aiError && aiLoading && (
@@ -312,37 +322,78 @@ export default function Home() {
             </p>
           )}
 
-          {!aiError && !aiLoading && aiComment && (
-            <div style={{ marginTop: 8 }}>
-              <h3 style={{ margin: "0 0 8px 0" }}>{aiComment.headline}</h3>
+          {!aiError && !aiLoading && aiComment && (() => {
+            const c: any = aiComment;
 
-              <ul style={{ margin: "0 0 10px 18px" }}>
-                {aiComment.bullets.map((b, i) => (
-                  <li key={i} style={{ marginBottom: 6 }}>
-                    {b}
-                  </li>
-                ))}
-              </ul>
+            // title: legacy.headline || simple.titulo
+            const title =
+              (typeof c?.headline === "string" && c.headline.trim()) ? c.headline :
+              (typeof c?.titulo === "string" && c.titulo.trim()) ? c.titulo :
+              "Comentario IA";
 
-              <p style={{ margin: "0 0 8px 0" }}>
-                <b>Lectura:</b> {aiComment.interpretation}
-              </p>
+            // main: legacy.interpretation || simple.comentario
+            const mainText =
+              (typeof c?.interpretation === "string" && c.interpretation.trim()) ? c.interpretation :
+              (typeof c?.comentario === "string" && c.comentario.trim()) ? c.comentario :
+              "";
 
-              <p style={{ margin: "0 0 8px 0" }}>
-                <b>Riesgos:</b> {aiComment.risks.join(" · ")}
-              </p>
+            // bullets: legacy only
+            const bullets = Array.isArray(c?.bullets) ? c.bullets : [];
 
-              <p style={{ margin: 0 }}>
-                <b>Confianza:</b> {aiComment.confidence}
-              </p>
-            </div>
-          )}
+            // risks: legacy.risks[] or simple.riesgos string
+            const risksArr = Array.isArray(c?.risks)
+              ? c.risks
+              : (typeof c?.riesgos === "string"
+                  ? c.riesgos
+                      .replace(/^Riesgos:\s*/i, "")
+                      .split(";")
+                      .map((s: string) => s.trim())
+                      .filter(Boolean)
+                  : []);
+
+            // confidence: legacy.confidence || simple.confianza
+            const conf =
+              (c?.confidence === "Baja" || c?.confidence === "Media" || c?.confidence === "Alta") ? c.confidence :
+              (c?.confianza === "Baja" || c?.confianza === "Media" || c?.confianza === "Alta") ? c.confianza :
+              "Baja";
+
+            return (
+              <div style={{ marginTop: 8 }}>
+                <h3 style={{ margin: "0 0 8px 0" }}>{title}</h3>
+
+                {bullets.length > 0 && (
+                  <ul style={{ margin: "0 0 10px 18px" }}>
+                    {bullets.map((b: string, i: number) => (
+                      <li key={i} style={{ marginBottom: 6 }}>
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {mainText && (
+                  <p style={{ margin: "0 0 8px 0" }}>
+                    <b>Comentario:</b> {mainText}
+                  </p>
+                )}
+
+                {risksArr.length > 0 && (
+                  <p style={{ margin: "0 0 8px 0" }}>
+                    <b>Riesgos:</b> {risksArr.join(" · ")}
+                  </p>
+                )}
+
+                <p style={{ margin: 0 }}>
+                  <b>Confianza:</b> {conf}
+                </p>
+              </div>
+            );
+          })()}
         </div>
 
         <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
           Nota: comentario automático basado en datos del modelo (z-score, señal,
-          probabilidad, VIX/DXY/Y10 y forecast de Au). No constituye recomendación
-          de inversión.
+          probabilidad, VIX/DXY/Y10 y forecast de Au).
         </p>
       </section>
 

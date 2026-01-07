@@ -15,14 +15,14 @@ export const COMMENT_JSON_SCHEMA = {
     type: "object",
     additionalProperties: false,
     properties: {
-      comentario: { type: "string" },
-      riesgos: { type: "string" },
+      titulo: { type: "string", minLength: 4, maxLength: 60 },
+      comentario: { type: "string", minLength: 40 },
+      riesgos: { type: "string", minLength: 10 },
       confianza: { type: "string", enum: ["Baja", "Media", "Alta"] },
     },
-    required: ["comentario", "riesgos", "confianza"],
+    required: ["titulo", "comentario", "riesgos", "confianza"],
   },
 };
-
 
 
 // =========================
@@ -313,14 +313,20 @@ Reglas:
 - No menciones temas operativos (abastecimiento/flujo/logística) salvo que el snapshot lo traiga explícito.
 - "confianza" SOLO por probabilidad:
   Baja: <0.6 o sin dato | Media: [0.6,0.8) | Alta: >=0.8
-- Si mencionas forecast de Au, DEBES indicar la fecha exacta del forecast (next_forecast_date). Si falta, escribe “fecha: sin dato”.
+- Si mencionas forecast de Au, DEBES indicar la fecha exacta (next_forecast_date). Si falta, “fecha: sin dato”.
+- En riesgos usa SIEMPRE punto y coma "; " para separar 2 riesgos. No uses "·".
+- No escribas el prefijo "Lectura:" en ninguna parte.
 
-FORMATO OBLIGATORIO (exactamente 3 líneas, sin bullets):
-1) comentario: un SOLO párrafo como este estilo (incluye SIEMPRE postura + sustento + forecast con fecha):
-   "En base a ... (|z| y prob), se sugiere mantener una postura ... en la negociación con proveedores, priorizando ... .
-    La proyección de oro para YYYY-MM-DD: P50=____ USD vs último close ____ USD (≈ __%), rango P10–P90 ____–____ USD, ... ."
-2) riesgos: una sola línea que empiece exactamente con "Riesgos: " y contenga 2 riesgos cortos separados por "; ".
-3) confianza: una sola línea que empiece exactamente con "Confianza: " y sea Baja/Media/Alta.
+FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets):
+0) titulo: una línea corta (4–8 palabras). Nunca escribas "sin dato".
+1) comentario: un SOLO párrafo:
+   - Inicia con: "En base a |z|=__ y probabilidad __, se sugiere mantener una postura (Conservadora/Neutral/Flexible) ..."
+   - Luego SIEMPRE describe la proyección de Au en forma narrativa y con fecha:
+     "La proyección de oro para YYYY-MM-DD sugiere una (baja/alza) estimada de ~X% al P50,
+      con P50=____ USD vs último close ____ USD (≈ X%). El rango P10–P90 es ____–____ USD."
+   - Si no hay % o fecha: escribe "sin dato" en esa parte.
+2) riesgos: una sola línea "Riesgos: <riesgo1>; <riesgo2>"
+3) confianza: una sola línea "Confianza: Baja/Media/Alta"
 `.trim();
 
 

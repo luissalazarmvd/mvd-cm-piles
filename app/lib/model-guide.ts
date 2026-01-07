@@ -3,15 +3,15 @@
 // Prioriza: paper de gold–silver mean reversion + ML regime filter (estable vs inestable)
 // y lo adapta a tu dashboard (signal/prob/zscore + macro + forecast Au).
 
-export type CommentJSON = {
+type CommentJSON = {
   titulo: string;              // 1 línea
   resumen: string;             // 2–3 líneas máximo
   puntos_clave: string[];      // 3–4 bullets máximo
-  riesgos: string[];           // 1–2 bullets máximo
+  riesgos: string[];           // 2 bullets máximo
   confianza: "Baja" | "Media" | "Alta";
 };
 
-export const COMMENT_JSON_SCHEMA = {
+const schema = {
   name: "comment_schema_simple",
   schema: {
     type: "object",
@@ -25,7 +25,8 @@ export const COMMENT_JSON_SCHEMA = {
     },
     required: ["titulo", "resumen", "puntos_clave", "riesgos", "confianza"],
   },
-} as const;
+};
+
 
 // =========================
 // Helpers numéricos / fechas
@@ -86,7 +87,7 @@ function strOrNA(s: any): string {
 //
 // Paper: el z-score mide desviación del spread normalizado; la señal “tradable” se valida
 // con un "regime filter" (estable vs inestable) usando features macro/volatilidad.
-// En tu implementación, ese filtro ya está resumido en signal/probability + vix_regime.
+// En tu implementación, ese "gate" ya está resumido en signal/probability + vix_regime.
 // Entonces:
 // - z_abs: magnitud del desequilibrio (intensidad)
 // - probability + vix_regime/VIX: calidad del régimen (estable/inestable)
@@ -145,13 +146,18 @@ export function inferRegime(snapshot: SnapshotLike): {
 
   const why: string[] = [];
 
-  const vixStressed = (vix != null && vix >= 25) || /HIGH/i.test(vixReg);
-  const vixCalm = (vix != null && vix <= 18) || /LOW/i.test(vixReg);
+  const vixStressed =
+    (vix != null && vix >= 25) ||
+    /HIGH/i.test(vixReg);
+
+  const vixCalm =
+    (vix != null && vix <= 18) ||
+    /LOW/i.test(vixReg);
 
   if (vixStressed) why.push(`VIX elevado (${fmtNum(vix, 2)}) o régimen HIGH`);
   if (vixCalm) why.push(`VIX bajo/moderado (${fmtNum(vix, 2)}) o régimen LOW`);
 
-  // prob como proxy de “filtro ML”
+  // prob como proxy de “gate ML” (paper: classifier estable=1)
   const probStrong = prob != null && prob >= 0.7;
   const probWeak = prob != null && prob < 0.6;
 
@@ -160,6 +166,7 @@ export function inferRegime(snapshot: SnapshotLike): {
 
   if (vix == null && !vixReg && prob == null) return { regime: "Sin dato", why: ["macro/signal sin dato"] };
 
+  // regla simple:
   if (vixCalm && probStrong) return { regime: "Estable", why };
   if (vixStressed && probWeak) return { regime: "Inestable", why };
 
@@ -175,6 +182,7 @@ export function inferPressure(snapshot: SnapshotLike): {
 
   if (zAbs == null) return { pressure: "Sin dato", label: "sin dato" };
 
+  // paper usa ±1σ como umbral base y comenta que crisis suele exceder ±2σ
   if (zAbs >= 2.0) return { pressure: "Extrema", label: `|z|=${fmtNum(zAbs, 2)} (≥2σ)` };
   if (zAbs >= 1.5) return { pressure: "Alta", label: `|z|=${fmtNum(zAbs, 2)} (1.5–2σ)` };
   if (zAbs >= 1.0) return { pressure: "Moderada", label: `|z|=${fmtNum(zAbs, 2)} (1–1.5σ)` };
@@ -192,25 +200,29 @@ export function inferSignalNarrative(snapshot: SnapshotLike): {
 
   const nuance: string[] = [];
 
+  // Signal meaning in tu sistema (discreto ya filtrado)
+  // + paper: signal solo debe ser “operable” si regime=estable (classifier=1)
   if (signal === 1) {
-    nuance.push("Señal activa (1): condición consistente con reversión favorable.");
+    nuance.push("Señal activa (1): condición consistente con ventana de reversión favorable (gate estable).");
   } else if (signal === -1) {
-    nuance.push("Señal activa (-1): condición consistente con riesgo elevado.");
+    nuance.push("Señal activa (-1): condición consistente con ventana de reversión desfavorable / riesgo elevado.");
   } else if (signal === 0) {
-    nuance.push("Sin señal discreta (0): no se valida acción.");
+    nuance.push("Sin señal discreta (0): el gate no valida acción (o no se alcanzó umbral).");
   } else {
     nuance.push("Señal: sin dato.");
   }
 
+  // presión / pre-señal (tu caso)
   if (signal === 0 && (pressure === "Alta" || pressure === "Extrema")) {
-    nuance.push(`Presión estadística ${pressure.toLowerCase()} ${label} sin confirmación (pre-señal).`);
+    nuance.push(`Presión estadística ${pressure.toLowerCase()} ${label} sin confirmación del gate (pre-señal).`);
   } else if (pressure !== "Sin dato") {
     nuance.push(`Presión estadística: ${pressure} (${label}).`);
   }
 
   if (prob != null) nuance.push(`Probabilidad: ${fmtNum(prob, 3)}.`);
-  nuance.push(`Régimen (proxy): ${regime}${why.length ? ` — ${why.join("; ")}` : ""}.`);
+  nuance.push(`Régimen (proxy ML): ${regime}${why.length ? ` — ${why.join("; ")}` : ""}.`);
 
+  // core (1 línea)
   let core = "Lectura: ";
   if (signal === 1) core += "escenario favorable filtrado por régimen.";
   else if (signal === -1) core += "escenario desfavorable filtrado por régimen.";
@@ -247,12 +259,9 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
   if (ret7 != null) details.push(`Retorno 7D: ${fmtPct(round2(ret7), 2)}.`);
   if (ret30 != null) details.push(`Retorno 30D: ${fmtPct(round2(ret30), 2)}.`);
 
+  // enfoque probabilístico (no “precisión falsa”)
   if (p50 != null && fD) {
-    details.push(
-      `Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${
-        p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""
-      }.`
-    );
+    details.push(`Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""}.`);
   } else {
     details.push("Forecast próximo: sin dato.");
   }
@@ -263,8 +272,8 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
 
   const line =
     p50 != null
-      ? "Au: lectura por rango (P10–P90) con centro P50; evitar lectura puntual."
-      : "Au: sin forecast; solo lectura de último close y retornos.";
+      ? `Au: lectura por rango (P10–P90) con centro P50; evitar lectura puntual.`
+      : `Au: sin forecast; solo lectura de último close y retornos.`;
 
   return { line, details };
 }
@@ -273,6 +282,7 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
 // Prompt builder
 // =========================
 export function buildCommentPrompt(snapshot: SnapshotLike) {
+  // “Notas internas” (no se muestran en UI, pero guían al modelo):
   const { core, nuance } = inferSignalNarrative(snapshot);
   const { line: goldLine, details: goldDetails } = inferGoldNarrative(snapshot);
 
@@ -293,7 +303,7 @@ export function buildCommentPrompt(snapshot: SnapshotLike) {
     },
   };
 
-  const system = `
+  const sys = `
 Eres analista para un dashboard usado por Gerencia General y Finanzas.
 Objetivo: explicar el estado del mercado y el riesgo en lenguaje simple.
 
@@ -313,19 +323,21 @@ Estilo de salida:
 - confianza: Baja/Media/Alta.
 `.trim();
 
+
   const user = `
 Genera el comentario para gerencia usando SOLO este snapshot JSON.
 Piensa con todos los indicadores, pero escribe SIMPLE y corto.
-
 Snapshot:
 ${JSON.stringify(snapshot)}
-
-Notas internas (para guiar tu redacción, no jerga):
-${JSON.stringify(notes)}
 `.trim();
 
+
+Notas:
+${JSON.stringify(notes)}
+  `.trim();
+
   return {
-    system,
+    system: sys,
     user,
     schema: COMMENT_JSON_SCHEMA,
   };

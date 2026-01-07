@@ -31,6 +31,7 @@ export default function Home() {
   const [aiLoading, setAiLoading] = useState(true);
   const [aiError, setAiError] = useState<string>("");
   const [aiComment, setAiComment] = useState<CommentJSON | null>(null);
+  const [aiProb, setAiProb] = useState<number | null>(null);
 
   async function loadAIComment() {
     setAiLoading(true);
@@ -39,6 +40,9 @@ export default function Home() {
       const res = await fetch("/api/comment", { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || "Error");
+      const prob = Number(j?.snapshot?.scenarios?.probability);
+      setAiProb(null);
+
 
       // Preferir el formato nuevo si existe; sino el legacy
       setAiComment(j.comment_simple ?? j.comment ?? null);
@@ -384,8 +388,10 @@ export default function Home() {
                 )}
 
                 <p style={{ margin: 0 }}>
-                  <b>Confianza:</b> {conf}
+                <b>Confianza:</b> {conf}
+                {aiProb != null ? ` (prob=${aiProb.toFixed(3)})` : " (prob=sin dato)"}
                 </p>
+
               </div>
             );
           })()}

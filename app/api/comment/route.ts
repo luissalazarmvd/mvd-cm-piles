@@ -321,26 +321,35 @@ export async function GET() {
     const raw = JSON.parse(text);
 
     // ✅ Devuelve el formato simple (tu objetivo)
-    const simple: ApiCommentSimple = toSimpleFromModel(raw);
+const simple: ApiCommentSimple = toSimpleFromModel(raw);
 
-    // ✅ Compatibilidad para que NO reviente el cliente si todavía hace .map
-    const legacy: ApiCommentLegacy = {
-      headline: simple.titulo,
-      interpretation: simple.comentario,
-      bullets: [],                 // evita .map undefined
-      risks: [simple.riesgos],     // si tu UI lista riesgos, al menos muestra la línea
-      confidence: simple.confianza,
-    };
+// ✅ Deriva riesgos como array (para que el front pueda hacer .map sin romper)
+const risksArr =
+  (simple.riesgos ?? "")
+    .replace(/^Riesgos:\s*/i, "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 2);
 
-    return NextResponse.json({
-      snapshot,
-      comment: simple,        // <-- usa este en UI (sin bullets)
-      comment_legacy: legacy, // <-- temporal, por si tu UI aún espera arrays
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Error desconocido" },
-      { status: 500 }
-    );
-  }
+// ✅ Mantén el contrato anterior para que NO reviente el cliente si todavía hace .map
+const legacy: ApiCommentLegacy = {
+  headline: simple.titulo,
+  interpretation: simple.comentario,
+  bullets: [],           // SIEMPRE array
+  risks: risksArr,       // SIEMPRE array
+  confidence: simple.confianza,
+};
+
+return NextResponse.json({
+  snapshot,
+  comment: legacy,        // <-- DEJA ESTO para que tu UI actual no se caiga
+  comment_simple: simple, // <-- nuevo formato (lo usas luego)
+});
+} catch (err: any) {
+  return NextResponse.json(
+    { error: err?.message ?? "Error desconocido" },
+    { status: 500 }
+  );
+}
 }

@@ -4,28 +4,25 @@
 // y lo adapta a tu dashboard (signal/prob/zscore + macro + forecast Au).
 
 type CommentJSON = {
-  titulo: string;              // 1 línea
-  resumen: string;             // 2–3 líneas máximo
-  puntos_clave: string[];      // 3–4 bullets máximo
-  riesgos: string[];           // 2 bullets máximo
+  comentario: string; // 1 párrafo, sin bullets
+  riesgos: string;    // "Riesgos: ...; ..."
   confianza: "Baja" | "Media" | "Alta";
 };
 
 export const COMMENT_JSON_SCHEMA = {
-  name: "comment_schema_simple",
+  name: "comment_schema_text_only",
   schema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      titulo: { type: "string" },
-      resumen: { type: "string" },
-      puntos_clave: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 4 },
-      riesgos: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 2 },
+      comentario: { type: "string" },
+      riesgos: { type: "string" },
       confianza: { type: "string", enum: ["Baja", "Media", "Alta"] },
     },
-    required: ["titulo", "resumen", "puntos_clave", "riesgos", "confianza"],
+    required: ["comentario", "riesgos", "confianza"],
   },
 };
+
 
 
 // =========================
@@ -304,49 +301,28 @@ export function buildCommentPrompt(snapshot: SnapshotLike) {
   const sys = `
 Eres analista para un dashboard usado por Gerencia General y Finanzas.
 
-Contexto del negocio (usa esto para interpretar el riesgo):
+Contexto:
 - La empresa se dedica al acopio y procesamiento de mineral aurífero de terceros (sin extracción).
-- La rentabilidad depende del precio de Au y la volatilidad (riesgo de margen y liquidez).
-- El comentario debe ayudar a definir postura de negociación con proveedores de mineral (más conservadora vs más flexible),
-  NO es un reporte de trading.
-
-Objetivo:
-Explicar el estado del mercado, el riesgo y su traducción a una postura de negociación de mineral.
+- El texto debe ayudar a definir postura de negociación con proveedores (conservadora/neutral/flexible).
+- NO es trading.
 
 Reglas:
 - No inventes datos. Si falta, di “sin dato”.
-- No asumas condiciones comerciales específicas (pagables, penalidades, bonos) si no están en el snapshot.
-- No uses jerga técnica: NO digas “gate”, “bias”, “z_delta”, “clasificador”, etc.
-- Sí puedes mencionar 2–3 números como sustento (ej: |z|, probabilidad, forecast P50 vs último close).
-- No des recomendaciones de compra/venta.
-- No menciones “régimen VIX”, “LOW_VIX”, “HIGH_VIX” ni etiquetas de régimen. Si usas VIX, dilo como:
-  “índice de volatilidad del S&P 500 (VIX)” y úsalo solo como termómetro de incertidumbre de mercado.
-- No menciones “interrupciones en el flujo de mineral”, “abastecimiento”, “supply”, “continuidad de suministro” ni temas operativos
-  a menos que el snapshot incluya datos operativos explícitos sobre volumen/flujo/logística.
-- Debes entregar SIEMPRE una postura de negociación en términos cualitativos:
-  “Conservadora”, “Neutral” o “Flexible”.
-  - Conservadora: prioriza proteger margen ante alta incertidumbre/volatilidad o señales débiles.
-  - Flexible: permite mayor flexibilidad comercial cuando el riesgo de mercado luce más controlado y señales más sólidas.
-  - Neutral: condiciones mixtas; equilibrio entre margen y captación.
-- No digas montos, porcentajes de castigo, ni condiciones específicas. Solo el nivel y el objetivo (margen vs captación) con indicadores.
-- La salida "confianza" debe basarse SOLO en la probabilidad del snapshot:
-  - Baja: probabilidad < 0.6 o sin dato
-  - Media: 0.6 <= probabilidad < 0.8
-  - Alta: probabilidad >= 0.8
+- No uses jerga técnica.
+- No menciones “régimen VIX”. Si usas VIX, dilo como “índice de volatilidad del S&P 500 (VIX)”.
+- No menciones temas operativos (abastecimiento/flujo/logística) salvo que el snapshot lo traiga explícito.
+- "confianza" SOLO por probabilidad:
+  Baja: <0.6 o sin dato | Media: [0.6,0.8) | Alta: >=0.8
+- Si mencionas forecast de Au, DEBES indicar la fecha exacta del forecast (next_forecast_date). Si falta, escribe “fecha: sin dato”.
 
-FORMATO OBLIGATORIO DE SALIDA (no uses bullets):
-- titulo: 1 línea (máx 10–12 palabras), estilo “Presión alta sin confirmación”.
-- resumen: 1 solo párrafo (máx 4 líneas) en español simple y gerencial, que SIEMPRE incluya:
-  (1) presión y probabilidad (ej: |z| y prob),
-  (2) una frase explícita de postura para negociación con proveedores y el objetivo (proteger margen vs ser más atractivo),
-  (3) forecast de Au: P50 en USD y % vs último close, y si existe, rango P10–P90 en USD.
-  Ejemplo de estilo:
-  "En base a |z|=X y probabilidad Y, se sugiere mantener una postura conservadora en la negociación con proveedores,
-   priorizando margen mientras no exista confirmación. La proyección de oro: P50=____ USD vs último close ____ USD (≈ __%),
-   rango P10–P90 ____–____ USD, respalda cautela hasta que la señal se fortalezca."
-- riesgos: 1 línea con exactamente 2 riesgos cortos separados por “;”. No inventes riesgos operativos.
-- confianza: Baja/Media/Alta (según la regla de probabilidad).
+FORMATO OBLIGATORIO (exactamente 3 líneas, sin bullets):
+1) comentario: un SOLO párrafo como este estilo (incluye SIEMPRE postura + sustento + forecast con fecha):
+   "En base a ... (|z| y prob), se sugiere mantener una postura ... en la negociación con proveedores, priorizando ... .
+    La proyección de oro para YYYY-MM-DD: P50=____ USD vs último close ____ USD (≈ __%), rango P10–P90 ____–____ USD, ... ."
+2) riesgos: una sola línea que empiece exactamente con "Riesgos: " y contenga 2 riesgos cortos separados por "; ".
+3) confianza: una sola línea que empiece exactamente con "Confianza: " y sea Baja/Media/Alta.
 `.trim();
+
 
   const user = `
 Genera el comentario para gerencia usando SOLO este snapshot JSON.

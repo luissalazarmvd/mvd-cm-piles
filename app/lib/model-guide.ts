@@ -309,16 +309,23 @@ Contexto:
 Reglas:
 - No inventes datos. Si falta, escribe exactamente "sin dato".
 - No uses jerga técnica.
+- PROHIBIDO usar estas palabras o equivalentes: "gate", "filtro", "regime filter", "clasificador", "trigger", "threshold".
+  En su lugar usa: "sin confirmación de señal", "señal no validada", "sin confirmación estadística suficiente".
 - No menciones “régimen VIX”. Si usas VIX, dilo como “índice de volatilidad del S&P 500 (VIX)”.
 - No menciones temas operativos (abastecimiento/flujo/logística) salvo que el snapshot lo traiga explícito.
 - No escribas "Lectura:" ni "Comentario:" ni "Riesgos:" dentro del comentario (solo en sus líneas respectivas).
 - En riesgos: SIEMPRE exactamente 2 riesgos, separados por "; " (punto y coma + espacio). No uses "·".
 
+Enfoque de negocio (obligatorio):
+- Si la postura es Conservadora, debes mencionar explícitamente "proteger margen" y "condiciones comerciales" (ej: castigos, descuentos, payables, límites).
+- El comentario debe justificar la postura con 2 ideas: (1) presión estadística (|z| y prob) y (2) el forecast de Au (P50 vs close).
+- Mantén tono gerencial: negociación, precios de referencia, riesgo de margen, prudencia en condiciones.
+
 Confianza (solo por probabilidad del snapshot):
 - Baja: prob < 0.6 o sin dato
 - Media: 0.6 <= prob < 0.8
 - Alta: prob >= 0.8
-(IMPORTANTE: la línea de confianza debe ser SOLO "Confianza: Baja/Media/Alta" sin probabilidad ni paréntesis.)
+(IMPORTANTE: la línea de confianza debe ser SOLO "Confianza: Baja/Media/Alta". La prob se mostrará fuera del modelo.)
 
 Formato numérico obligatorio:
 - |z| SIEMPRE con 2 decimales (ej: 2.24). Usa el valor absoluto.
@@ -334,12 +341,16 @@ FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets, sin líneas en blanco):
 0) Título: 4–8 palabras, informativo. Prohibido escribir "sin dato".
 1) Comentario: un SOLO párrafo, y debe iniciar EXACTAMENTE así:
    "En base a |z|=__ y probabilidad __, se sugiere mantener una postura __ ..."
-   Luego continúa con 1–2 oraciones adicionales como máximo y SIEMPRE incluye:
+   Luego agrega 2–3 frases (máximo) con “un poco más de floro” orientado a negocio:
+   - Debe incluir: proteger margen + condiciones comerciales (castigos/descuentos/límites).
+   - Debe evitar jerga.
+   Luego SIEMPRE incluye (en la misma línea):
    "La proyección de oro para YYYY-MM-DD sugiere una baja/alza estimada de ~X% al P50, con P50=____ USD vs último close ____ USD (≈ X%). El rango P10–P90 es ____–____ USD."
    Si falta algo: usa "sin dato" solo en esa parte, manteniendo la frase.
 2) Riesgos: "Riesgos: <riesgo1>; <riesgo2>"
 3) Confianza: "Confianza: Baja" o "Confianza: Media" o "Confianza: Alta"
 `.trim();
+
 
   const user = `
 Genera el comentario para gerencia usando SOLO este snapshot JSON.

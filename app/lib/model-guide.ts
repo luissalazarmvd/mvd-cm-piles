@@ -11,7 +11,7 @@ type CommentJSON = {
   confianza: "Baja" | "Media" | "Alta";
 };
 
-const schema = {
+export const COMMENT_JSON_SCHEMA = {
   name: "comment_schema_simple",
   schema: {
     type: "object",
@@ -323,7 +323,6 @@ Estilo de salida:
 - confianza: Baja/Media/Alta.
 `.trim();
 
-
   const user = `
 Genera el comentario para gerencia usando SOLO este snapshot JSON.
 Piensa con todos los indicadores, pero escribe SIMPLE y corto.
@@ -331,14 +330,16 @@ Snapshot:
 ${JSON.stringify(snapshot)}
 `.trim();
 
+  const userWithNotes = `
+${user}
 
 Notas:
 ${JSON.stringify(notes)}
-  `.trim();
+`.trim();
 
   return {
     system: sys,
-    user,
+    user: userWithNotes,
     schema: COMMENT_JSON_SCHEMA,
   };
 }

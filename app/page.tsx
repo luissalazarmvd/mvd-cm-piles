@@ -391,7 +391,9 @@ setAiProb(Number.isFinite(prob) ? prob : null);
 
                 <p style={{ margin: 0 }}>
                 <b>Confianza:</b> {conf}
-                {aiProb != null ? ` (prob=${aiProb.toFixed(3)})` : " (prob=sin dato)"}
+                {aiProb != null
+                ? ` (prob=${(aiProb * 100).toFixed(1)}%)`
+                : " (prob=sin dato)"}
                 </p>
 
               </div>

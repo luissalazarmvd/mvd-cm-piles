@@ -40,8 +40,10 @@ export default function Home() {
       const res = await fetch("/api/comment", { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j?.error || "Error");
-      const prob = Number(j?.snapshot?.scenarios?.probability);
-      setAiProb(null);
+      const probRaw = j?.probability ?? j?.snapshot?.scenarios?.probability;
+const prob = typeof probRaw === "number" ? probRaw : Number(probRaw);
+setAiProb(Number.isFinite(prob) ? prob : null);
+
 
 
       // Preferir el formato nuevo si existe; sino el legacy

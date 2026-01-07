@@ -348,10 +348,12 @@ export async function GET() {
     };
 
     return NextResponse.json({
-      snapshot,
-      comment: legacy,         // ✅ DEJA ESTO para que tu UI actual NO se caiga
-      comment_simple: simple,  // ✅ nuevo formato (lo usas luego)
-    });
+  snapshot,
+  probability: prob0,     // <-- AGREGA ESTO (number)
+  comment: legacy,
+  comment_simple: simple,
+});
+
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message ?? "Error desconocido" },

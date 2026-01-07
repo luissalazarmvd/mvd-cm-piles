@@ -326,9 +326,8 @@ FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets):
       con P50=____ USD vs último close ____ USD (≈ X%). El rango P10–P90 es ____–____ USD."
    - Si no hay % o fecha: escribe "sin dato" en esa parte.
 2) riesgos: una sola línea "Riesgos: <riesgo1>; <riesgo2>"
-3) confianza: una sola línea que empiece exactamente con:
-   "Confianza: Baja (prob=0.XXX)" o "Confianza: Media (prob=0.XXX)" o "Confianza: Alta (prob=0.XXX)".
-   Usa SIEMPRE la probabilidad del snapshot con 3 decimales. Si no hay probabilidad: "Confianza: Baja (prob=sin dato)".
+3) confianza: una sola línea "Confianza: Baja" o "Confianza: Media" o "Confianza: Alta".
+   (La probabilidad se mostrará fuera del modelo usando el snapshot).
 `.trim();
 
 

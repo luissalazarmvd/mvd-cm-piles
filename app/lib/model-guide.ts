@@ -4,26 +4,26 @@
 // y lo adapta a tu dashboard (signal/prob/zscore + macro + forecast Au).
 
 export type CommentJSON = {
-  headline: string;
-  bullets: string[];
-  interpretation: string;
-  risks: string[];
-  confidence: "Baja" | "Media" | "Alta";
+  titulo: string;              // 1 línea
+  resumen: string;             // 2–3 líneas máximo
+  puntos_clave: string[];      // 3–4 bullets máximo
+  riesgos: string[];           // 2 bullets máximo
+  confianza: "Baja" | "Media" | "Alta";
 };
 
-export const COMMENT_JSON_SCHEMA = {
-  name: "comment_schema",
+export const schema = {
+  name: "comment_schema_simple",
   schema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      headline: { type: "string" },
-      bullets: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 5 },
-      interpretation: { type: "string" },
-      risks: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4 },
-      confidence: { type: "string", enum: ["Baja", "Media", "Alta"] },
+      titulo: { type: "string" },
+      resumen: { type: "string" },
+      puntos_clave: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 4 },
+      riesgos: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 2 },
+      confianza: { type: "string", enum: ["Baja", "Media", "Alta"] },
     },
-    required: ["headline", "bullets", "interpretation", "risks", "confidence"],
+    required: ["titulo", "resumen", "puntos_clave", "riesgos", "confianza"],
   },
 } as const;
 
@@ -37,7 +37,6 @@ export function safeNumber(n: any): number | null {
 
 export function safeDateStr(d: any): string | null {
   const s = typeof d === "string" ? d : null;
-  // admite "YYYY-MM-DD" o "YYYY-MM-DDTHH..."
   if (!s) return null;
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : null;
@@ -83,15 +82,6 @@ function strOrNA(s: any): string {
 // =========================
 // Lógica interpretativa (paper-first)
 // =========================
-//
-// Paper: el z-score mide desviación del spread normalizado; la señal “tradable” se valida
-// con un "regime filter" (estable vs inestable) usando features macro/volatilidad.
-// En tu implementación, ese "gate" ya está resumido en signal/probability + vix_regime.
-// Entonces:
-// - z_abs: magnitud del desequilibrio (intensidad)
-// - probability + vix_regime/VIX: calidad del régimen (estable/inestable)
-// - signal: acción discreta ya filtrada (cuando pasa umbral); si signal=0 pero z_abs alto => presión/pre-señal.
-
 export type SnapshotLike = {
   asof?: string | null;
   model?: { name?: string | null; version?: string | null } | null;
@@ -134,7 +124,6 @@ export type SnapshotLike = {
   } | null;
 };
 
-// Clasifica “estabilidad” estilo paper (regime filter) usando lo que tienes disponible
 export function inferRegime(snapshot: SnapshotLike): {
   regime: "Estable" | "Inestable" | "Mixto" | "Sin dato";
   why: string[];
@@ -145,18 +134,12 @@ export function inferRegime(snapshot: SnapshotLike): {
 
   const why: string[] = [];
 
-  const vixStressed =
-    (vix != null && vix >= 25) ||
-    /HIGH/i.test(vixReg);
-
-  const vixCalm =
-    (vix != null && vix <= 18) ||
-    /LOW/i.test(vixReg);
+  const vixStressed = (vix != null && vix >= 25) || /HIGH/i.test(vixReg);
+  const vixCalm = (vix != null && vix <= 18) || /LOW/i.test(vixReg);
 
   if (vixStressed) why.push(`VIX elevado (${fmtNum(vix, 2)}) o régimen HIGH`);
   if (vixCalm) why.push(`VIX bajo/moderado (${fmtNum(vix, 2)}) o régimen LOW`);
 
-  // prob como proxy de “gate ML” (paper: classifier estable=1)
   const probStrong = prob != null && prob >= 0.7;
   const probWeak = prob != null && prob < 0.6;
 
@@ -165,7 +148,6 @@ export function inferRegime(snapshot: SnapshotLike): {
 
   if (vix == null && !vixReg && prob == null) return { regime: "Sin dato", why: ["macro/signal sin dato"] };
 
-  // regla simple:
   if (vixCalm && probStrong) return { regime: "Estable", why };
   if (vixStressed && probWeak) return { regime: "Inestable", why };
 
@@ -181,7 +163,6 @@ export function inferPressure(snapshot: SnapshotLike): {
 
   if (zAbs == null) return { pressure: "Sin dato", label: "sin dato" };
 
-  // paper usa ±1σ como umbral base y comenta que crisis suele exceder ±2σ
   if (zAbs >= 2.0) return { pressure: "Extrema", label: `|z|=${fmtNum(zAbs, 2)} (≥2σ)` };
   if (zAbs >= 1.5) return { pressure: "Alta", label: `|z|=${fmtNum(zAbs, 2)} (1.5–2σ)` };
   if (zAbs >= 1.0) return { pressure: "Moderada", label: `|z|=${fmtNum(zAbs, 2)} (1–1.5σ)` };
@@ -199,29 +180,21 @@ export function inferSignalNarrative(snapshot: SnapshotLike): {
 
   const nuance: string[] = [];
 
-  // Signal meaning in tu sistema (discreto ya filtrado)
-  // + paper: signal solo debe ser “operable” si regime=estable (classifier=1)
-  if (signal === 1) {
-    nuance.push("Señal activa (1): condición consistente con ventana de reversión favorable (gate estable).");
-  } else if (signal === -1) {
-    nuance.push("Señal activa (-1): condición consistente con ventana de reversión desfavorable / riesgo elevado.");
-  } else if (signal === 0) {
-    nuance.push("Sin señal discreta (0): el gate no valida acción (o no se alcanzó umbral).");
-  } else {
-    nuance.push("Señal: sin dato.");
-  }
+  // Ojo: acá aún aparece “gate” en texto, pero es SOLO nota interna.
+  if (signal === 1) nuance.push("Señal activa (1): condición consistente con ventana de reversión favorable.");
+  else if (signal === -1) nuance.push("Señal activa (-1): condición consistente con ventana de reversión desfavorable / riesgo elevado.");
+  else if (signal === 0) nuance.push("Sin señal discreta (0): no se valida acción.");
+  else nuance.push("Señal: sin dato.");
 
-  // presión / pre-señal (tu caso)
   if (signal === 0 && (pressure === "Alta" || pressure === "Extrema")) {
-    nuance.push(`Presión estadística ${pressure.toLowerCase()} ${label} sin confirmación del gate (pre-señal).`);
+    nuance.push(`Presión estadística ${pressure.toLowerCase()} ${label} sin confirmación (pre-señal).`);
   } else if (pressure !== "Sin dato") {
     nuance.push(`Presión estadística: ${pressure} (${label}).`);
   }
 
   if (prob != null) nuance.push(`Probabilidad: ${fmtNum(prob, 3)}.`);
-  nuance.push(`Régimen (proxy ML): ${regime}${why.length ? ` — ${why.join("; ")}` : ""}.`);
+  nuance.push(`Régimen (proxy): ${regime}${why.length ? ` — ${why.join("; ")}` : ""}.`);
 
-  // core (1 línea)
   let core = "Lectura: ";
   if (signal === 1) core += "escenario favorable filtrado por régimen.";
   else if (signal === -1) core += "escenario desfavorable filtrado por régimen.";
@@ -258,9 +231,12 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
   if (ret7 != null) details.push(`Retorno 7D: ${fmtPct(round2(ret7), 2)}.`);
   if (ret30 != null) details.push(`Retorno 30D: ${fmtPct(round2(ret30), 2)}.`);
 
-  // enfoque probabilístico (no “precisión falsa”)
   if (p50 != null && fD) {
-    details.push(`Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""}.`);
+    details.push(
+      `Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${
+        p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""
+      }.`
+    );
   } else {
     details.push("Forecast próximo: sin dato.");
   }
@@ -271,8 +247,8 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
 
   const line =
     p50 != null
-      ? `Au: lectura por rango (P10–P90) con centro P50; evitar lectura puntual.`
-      : `Au: sin forecast; solo lectura de último close y retornos.`;
+      ? "Au: lectura por rango (P10–P90) con centro P50."
+      : "Au: sin forecast; solo lectura de último close y retornos.";
 
   return { line, details };
 }
@@ -281,7 +257,6 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
 // Prompt builder
 // =========================
 export function buildCommentPrompt(snapshot: SnapshotLike) {
-  // “Notas internas” (no se muestran en UI, pero guían al modelo):
   const { core, nuance } = inferSignalNarrative(snapshot);
   const { line: goldLine, details: goldDetails } = inferGoldNarrative(snapshot);
 
@@ -302,30 +277,35 @@ export function buildCommentPrompt(snapshot: SnapshotLike) {
     },
   };
 
-  const sys = `
-Eres analista cuantitativo para un dashboard interno.
-Tu marco principal es “mean reversion + z-score + filtro de régimen (estable/inestable)”.
-Reglas duras:
-- NO inventes datos. Si falta algo, escribe “sin dato”.
-- NO des recomendaciones de compra/venta. Solo lectura de contexto, consistencia y riesgos.
-- Z-score mide desviación; umbrales típicos: ~1σ (señal base), ~2σ (episodio extremo). Si |z| alto pero signal=0, es “presión/pre-señal” (aún no validada por el gate).
-- El “régimen” se interpreta con probabilidad + macro (VIX/DXY/Y10 / vix_regime). En régimen inestable, baja la convicción y prioriza riesgos.
-- Forecast de Au se interpreta como RANGO (P10/P50/P90) y ancho de banda. Evita falsa precisión.
-Formato de salida: JSON válido según el schema. Español (Perú), directo, sin relleno.
-  `.trim();
+  const system = `
+Eres analista para un dashboard usado por Gerencia General y Finanzas.
+Objetivo: explicar el estado del mercado y el riesgo en lenguaje simple.
+
+Reglas:
+- No inventes datos. Si falta, di “sin dato”.
+- No uses jerga técnica: NO digas “gate”, “bias”, “z_delta”, “clasificador”, etc.
+- Sí puedes mencionar 2–3 números como sustento (ej: VIX, |z|, probabilidad, forecast P50 vs último).
+- No des recomendaciones de compra/venta. Enfócate en lectura y riesgos para negociación/margen.
+- Máxima claridad y brevedad.
+
+Formato:
+- titulo: 1 línea (máx 12 palabras).
+- resumen: 2–3 líneas.
+- puntos_clave: 3–4 bullets, cada uno inicia con ✅ ⚠️ o 📌.
+- riesgos: 1–2 bullets.
+- confianza: Baja/Media/Alta.
+`.trim();
 
   const user = `
-Genera un comentario breve usando SOLO este snapshot JSON (datos) y estas notas (interpretación derivada).
+Genera el comentario para gerencia usando SOLO este snapshot JSON.
+Piensa con todos los indicadores, pero escribe SIMPLE y corto.
+
 Snapshot:
 ${JSON.stringify(snapshot)}
 
-Notas:
+Notas internas (para guiar tu redacción, no jerga):
 ${JSON.stringify(notes)}
-  `.trim();
+`.trim();
 
-  return {
-    system: sys,
-    user,
-    schema: COMMENT_JSON_SCHEMA,
-  };
+  return { system, user, schema };
 }

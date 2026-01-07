@@ -7,8 +7,16 @@ import { buildCommentPrompt } from "@/app/lib/model-guide";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Lo que tu UI probablemente espera (por tu código anterior)
-type ApiCommentJSON = {
+// ✅ Nuevo formato “simple” que quieres mostrar (sin bullets)
+type ApiCommentSimple = {
+  titulo: string;
+  comentario: string; // párrafo (sin bullets)
+  riesgos: string;    // "Riesgos: ...; ..."
+  confianza: "Baja" | "Media" | "Alta";
+};
+
+// (Compatibilidad) Lo que tu UI pudo haber esperado antes
+type ApiCommentLegacy = {
   headline: string;
   bullets: string[];
   interpretation: string;
@@ -16,13 +24,20 @@ type ApiCommentJSON = {
   confidence: "Baja" | "Media" | "Alta";
 };
 
-// Lo que devuelve el modelo (según tu schema actual)
-type ModelCommentJSON = {
-  titulo: string;
-  resumen: string;
-  puntos_clave: string[];
-  riesgos: string[];
-  confianza: "Baja" | "Media" | "Alta";
+// Soporta ambos esquemas: el viejo (arrays) y el nuevo (texto único)
+type ModelCommentOld = {
+  titulo?: string;
+  resumen?: string;
+  puntos_clave?: string[];
+  riesgos?: string[];
+  confianza?: "Baja" | "Media" | "Alta";
+};
+
+type ModelCommentNew = {
+  titulo?: string;
+  comentario?: string;
+  riesgos?: string; // línea
+  confianza?: "Baja" | "Media" | "Alta";
 };
 
 function safeNumber(n: any) {
@@ -58,23 +73,51 @@ function classifyZPressure(signal: number | null, zAbs: number | null) {
   return null;
 }
 
+// ✅ Regla final de confianza (la que definiste)
 function mapConfidence(prob: number | null): "Baja" | "Media" | "Alta" {
   if (prob == null) return "Baja";
   if (prob >= 0.8) return "Alta";
-  if (prob >= 0.65) return "Media";
+  if (prob >= 0.6) return "Media";
   return "Baja";
 }
 
-function degradeConfidence(
-  base: "Baja" | "Media" | "Alta",
-  vix: number | null,
-  vixRegime?: string | null
-): "Baja" | "Media" | "Alta" {
-  const stressed = (vix != null && vix >= 25) || (vixRegime && /HIGH/i.test(vixRegime));
-  if (!stressed) return base;
-  if (base === "Alta") return "Media";
-  if (base === "Media") return "Baja";
-  return "Baja";
+function ensureStr(x: any, fallback = "sin dato") {
+  return typeof x === "string" && x.trim() ? x.trim() : fallback;
+}
+
+function ensureConfidence(x: any): "Baja" | "Media" | "Alta" {
+  return x === "Alta" || x === "Media" || x === "Baja" ? x : "Baja";
+}
+
+function normalizeRisksLine(raw: string) {
+  const s = ensureStr(raw, "Riesgos: sin dato; sin dato");
+  if (/^Riesgos:\s*/i.test(s)) return s.replace(/^Riesgos:\s*/i, "Riesgos: ");
+  return `Riesgos: ${s}`;
+}
+
+function toSimpleFromModel(obj: any): ApiCommentSimple {
+  // Caso nuevo: {titulo, comentario, riesgos, confianza}
+  const asNew = obj as ModelCommentNew;
+  if (asNew && typeof asNew.comentario === "string") {
+    return {
+      titulo: ensureStr(asNew.titulo, "sin dato"),
+      comentario: ensureStr(asNew.comentario, "sin dato"),
+      riesgos: normalizeRisksLine(ensureStr(asNew.riesgos, "sin dato; sin dato")),
+      confianza: ensureConfidence(asNew.confianza),
+    };
+  }
+
+  // Caso viejo: {titulo, resumen, puntos_clave[], riesgos[], confianza}
+  const asOld = obj as ModelCommentOld;
+  const riesgosArr = Array.isArray(asOld?.riesgos) ? asOld.riesgos : [];
+  const riesgosLine = `Riesgos: ${riesgosArr.filter(Boolean).slice(0, 2).join("; ") || "sin dato; sin dato"}`;
+
+  return {
+    titulo: ensureStr(asOld?.titulo, "sin dato"),
+    comentario: ensureStr(asOld?.resumen, "sin dato"),
+    riesgos: normalizeRisksLine(riesgosLine),
+    confianza: ensureConfidence(asOld?.confianza),
+  };
 }
 
 export async function GET() {
@@ -191,10 +234,9 @@ export async function GET() {
       lastClose != null && bandWidthAbs != null ? (bandWidthAbs / lastClose) * 100 : null;
 
     // =========================
-    // 4) Confianza operativa
+    // 4) Confianza (solo por prob, como definiste)
     // =========================
-    const baseConf = mapConfidence(prob0);
-    const opConf = degradeConfidence(baseConf, vix0, s0.vix_regime ?? null);
+    const opConf = mapConfidence(prob0);
 
     // =========================
     // 5) Snapshot enriquecido
@@ -228,7 +270,7 @@ export async function GET() {
         vix: vix0,
         dxy: dxy0,
         y10: y10_0,
-        vix_regime: s0.vix_regime ?? null,
+        vix_regime: s0.vix_regime ?? null, // (aunque el sys prohíba mencionarlo)
       },
 
       gold: {
@@ -252,7 +294,7 @@ export async function GET() {
     };
 
     // =========================
-    // 6) Prompt desde model-guide (paper-first)
+    // 6) Prompt desde model-guide
     // =========================
     const model = process.env.OPENAI_COMMENT_MODEL || "gpt-5-mini";
     const { system, user, schema } = buildCommentPrompt(snapshot);
@@ -276,22 +318,25 @@ export async function GET() {
     const text = r.output_text?.trim();
     if (!text) throw new Error("OpenAI returned empty output_text");
 
-    const parsedModel: ModelCommentJSON = JSON.parse(text);
+    const raw = JSON.parse(text);
 
-    // Normaliza arrays SIEMPRE (para que nunca reviente el cliente con .map)
-    const bullets = Array.isArray(parsedModel?.puntos_clave) ? parsedModel.puntos_clave : [];
-    const risks = Array.isArray(parsedModel?.riesgos) ? parsedModel.riesgos : [];
+    // ✅ Devuelve el formato simple (tu objetivo)
+    const simple: ApiCommentSimple = toSimpleFromModel(raw);
 
-    // Mapea a lo que tu UI esperaba antes
-    const parsedApi: ApiCommentJSON = {
-      headline: typeof parsedModel?.titulo === "string" ? parsedModel.titulo : "sin dato",
-      interpretation: typeof parsedModel?.resumen === "string" ? parsedModel.resumen : "sin dato",
-      bullets,
-      risks,
-      confidence: parsedModel?.confianza ?? "Baja",
+    // ✅ Compatibilidad para que NO reviente el cliente si todavía hace .map
+    const legacy: ApiCommentLegacy = {
+      headline: simple.titulo,
+      interpretation: simple.comentario,
+      bullets: [],                 // evita .map undefined
+      risks: [simple.riesgos],     // si tu UI lista riesgos, al menos muestra la línea
+      confidence: simple.confianza,
     };
 
-    return NextResponse.json({ snapshot, comment: parsedApi });
+    return NextResponse.json({
+      snapshot,
+      comment: simple,        // <-- usa este en UI (sin bullets)
+      comment_legacy: legacy, // <-- temporal, por si tu UI aún espera arrays
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message ?? "Error desconocido" },

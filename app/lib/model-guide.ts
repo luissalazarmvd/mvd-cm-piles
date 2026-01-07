@@ -329,6 +329,13 @@ Reglas:
   - Baja: probabilidad < 0.6 o sin dato
   - Media: 0.6 <= probabilidad < 0.8
   - Alta: probabilidad >= 0.8
+- No menciones “régimen VIX”, “LOW_VIX”, “HIGH_VIX” ni etiquetas de régimen. Si usas VIX, dilo como:
+  “índice de volatilidad del S&P 500 (VIX)” y úsalo solo como termómetro de incertidumbre de mercado.
+- No menciones “interrupciones en el flujo de mineral”, “abastecimiento”, “supply”, “continuidad de suministro” ni temas operativos
+  a menos que el snapshot incluya datos operativos explícitos sobre volumen/flujo/logística.
+- La línea de "Postura:" no debe ser solo una palabra. Debe ser una frase gerencial que incluya:
+  (1) el nivel (Conservadora/Neutral/Flexible) y (2) el objetivo (margen vs captación), sin números de castigo.
+  Ejemplo: "Postura: Conservadora — negociar con mayor prudencia para priorizar margen dado |z| alto y probabilidad baja."
 
 Estilo de salida:
 - titulo: 1 línea, máximo 12 palabras.

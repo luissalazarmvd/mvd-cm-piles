@@ -316,11 +316,14 @@ Reglas:
 - Si mencionas forecast de Au, DEBES indicar la fecha exacta (next_forecast_date). Si falta, “fecha: sin dato”.
 - En riesgos usa SIEMPRE punto y coma "; " para separar 2 riesgos. No uses "·".
 - No escribas el prefijo "Lectura:" en ninguna parte.
+- Formato numérico obligatorio:
+  - |z| SIEMPRE con 2 decimales (ej: 2.24).
+  - probabilidad SIEMPRE en porcentaje con 1 decimal (ej: 1.3%) en el comentario.
 
 FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets):
 0) titulo: una línea corta (4–8 palabras). Nunca escribas "sin dato".
 1) comentario: un SOLO párrafo:
-   - Inicia con: "En base a |z|=__ y probabilidad __, se sugiere mantener una postura (Conservadora/Neutral/Flexible) ..."
+   - Inicia con: "En base a |z|=__ (2 decimales) y probabilidad __% (1 decimal), se sugiere mantener una postura (Conservadora/Neutral/Flexible) ..."
    - Luego SIEMPRE describe la proyección de Au en forma narrativa y con fecha:
      "La proyección de oro para YYYY-MM-DD sugiere una (baja/alza) estimada de ~X% al P50,
       con P50=____ USD vs último close ____ USD (≈ X%). El rango P10–P90 es ____–____ USD."

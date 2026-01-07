@@ -200,8 +200,6 @@ export function inferSignalNarrative(snapshot: SnapshotLike): {
 
   const nuance: string[] = [];
 
-  // Signal meaning in tu sistema (discreto ya filtrado)
-  // + paper: signal solo debe ser “operable” si regime=estable (classifier=1)
   if (signal === 1) {
     nuance.push("Señal activa (1): condición consistente con ventana de reversión favorable (gate estable).");
   } else if (signal === -1) {
@@ -212,7 +210,6 @@ export function inferSignalNarrative(snapshot: SnapshotLike): {
     nuance.push("Señal: sin dato.");
   }
 
-  // presión / pre-señal (tu caso)
   if (signal === 0 && (pressure === "Alta" || pressure === "Extrema")) {
     nuance.push(`Presión estadística ${pressure.toLowerCase()} ${label} sin confirmación del gate (pre-señal).`);
   } else if (pressure !== "Sin dato") {
@@ -222,7 +219,6 @@ export function inferSignalNarrative(snapshot: SnapshotLike): {
   if (prob != null) nuance.push(`Probabilidad: ${fmtNum(prob, 3)}.`);
   nuance.push(`Régimen (proxy ML): ${regime}${why.length ? ` — ${why.join("; ")}` : ""}.`);
 
-  // core (1 línea)
   let core = "Lectura: ";
   if (signal === 1) core += "escenario favorable filtrado por régimen.";
   else if (signal === -1) core += "escenario desfavorable filtrado por régimen.";
@@ -259,9 +255,12 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
   if (ret7 != null) details.push(`Retorno 7D: ${fmtPct(round2(ret7), 2)}.`);
   if (ret30 != null) details.push(`Retorno 30D: ${fmtPct(round2(ret30), 2)}.`);
 
-  // enfoque probabilístico (no “precisión falsa”)
   if (p50 != null && fD) {
-    details.push(`Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""}.`);
+    details.push(
+      `Forecast próximo (${fD}): P50=${fmtNum(p50, 2)}${
+        p10 != null && p90 != null ? ` (P10=${fmtNum(p10, 2)}, P90=${fmtNum(p90, 2)})` : ""
+      }.`
+    );
   } else {
     details.push("Forecast próximo: sin dato.");
   }
@@ -282,7 +281,6 @@ export function inferGoldNarrative(snapshot: SnapshotLike): {
 // Prompt builder
 // =========================
 export function buildCommentPrompt(snapshot: SnapshotLike) {
-  // “Notas internas” (no se muestran en UI, pero guían al modelo):
   const { core, nuance } = inferSignalNarrative(snapshot);
   const { line: goldLine, details: goldDetails } = inferGoldNarrative(snapshot);
 

@@ -7,12 +7,22 @@ import { buildCommentPrompt } from "@/app/lib/model-guide";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type CommentJSON = {
+// Lo que tu UI probablemente espera (por tu código anterior)
+type ApiCommentJSON = {
   headline: string;
   bullets: string[];
   interpretation: string;
   risks: string[];
   confidence: "Baja" | "Media" | "Alta";
+};
+
+// Lo que devuelve el modelo (según tu schema actual)
+type ModelCommentJSON = {
+  titulo: string;
+  resumen: string;
+  puntos_clave: string[];
+  riesgos: string[];
+  confianza: "Baja" | "Media" | "Alta";
 };
 
 function safeNumber(n: any) {
@@ -40,7 +50,6 @@ function pctChange(from: number | null, to: number | null) {
 }
 
 function classifyZPressure(signal: number | null, zAbs: number | null) {
-  // “pre-señal”: signal=0 pero z se está yendo a zonas altas
   if (signal === 0 && zAbs != null) {
     if (zAbs >= 2.0) return "Presión extrema sin señal (pre-señal fuerte)";
     if (zAbs >= 1.5) return "Presión alta sin señal (pre-señal)";
@@ -249,28 +258,40 @@ export async function GET() {
     const { system, user, schema } = buildCommentPrompt(snapshot);
 
     const r = await openai.responses.create({
-  model,
-  input: [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ],
-  text: {
-    format: {
-      type: "json_schema",
-      name: schema.name ?? "comment_schema",
-      strict: true,
-      schema: schema.schema,
-    },
-  },
-});
-
+      model,
+      input: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: schema.name ?? "comment_schema",
+          strict: true,
+          schema: schema.schema,
+        },
+      },
+    });
 
     const text = r.output_text?.trim();
     if (!text) throw new Error("OpenAI returned empty output_text");
 
-    const parsed: CommentJSON = JSON.parse(text);
+    const parsedModel: ModelCommentJSON = JSON.parse(text);
 
-    return NextResponse.json({ snapshot, comment: parsed });
+    // Normaliza arrays SIEMPRE (para que nunca reviente el cliente con .map)
+    const bullets = Array.isArray(parsedModel?.puntos_clave) ? parsedModel.puntos_clave : [];
+    const risks = Array.isArray(parsedModel?.riesgos) ? parsedModel.riesgos : [];
+
+    // Mapea a lo que tu UI esperaba antes
+    const parsedApi: ApiCommentJSON = {
+      headline: typeof parsedModel?.titulo === "string" ? parsedModel.titulo : "sin dato",
+      interpretation: typeof parsedModel?.resumen === "string" ? parsedModel.resumen : "sin dato",
+      bullets,
+      risks,
+      confidence: parsedModel?.confianza ?? "Baja",
+    };
+
+    return NextResponse.json({ snapshot, comment: parsedApi });
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message ?? "Error desconocido" },

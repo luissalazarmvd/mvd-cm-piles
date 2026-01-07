@@ -251,7 +251,7 @@ export async function GET() {
     const r = await openai.responses.create({
   model,
   input: [
-    { role: "system", content: sys },
+    { role: "system", content: system },
     { role: "user", content: user },
   ],
   text: {

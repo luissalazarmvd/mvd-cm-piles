@@ -249,13 +249,21 @@ export async function GET() {
     const { system, user, schema } = buildCommentPrompt(snapshot);
 
     const r = await openai.responses.create({
-      model,
-      input: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "json_schema", json_schema: schema },
-    });
+  model,
+  input: [
+    { role: "system", content: sys },
+    { role: "user", content: user },
+  ],
+  text: {
+    format: {
+      type: "json_schema",
+      name: schema.name ?? "comment_schema",
+      strict: true,
+      schema: schema.schema,
+    },
+  },
+});
+
 
     const text = r.output_text?.trim();
     if (!text) throw new Error("OpenAI returned empty output_text");

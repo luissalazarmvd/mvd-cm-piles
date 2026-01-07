@@ -403,7 +403,7 @@ setAiProb(Number.isFinite(prob) ? prob : null);
 
         <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
           Nota: comentario automático basado en datos del modelo (z-score, señal,
-          probabilidad, VIX/DXY/Y10 y forecast de Au).
+          probabilidad, VIX/DXY/Y10 y forecast de Au). Con tecnología de OpenAI.
         </p>
       </section>
 

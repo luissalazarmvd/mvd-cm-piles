@@ -338,7 +338,11 @@ Forecast Au:
 - Debes incluir P50 vs último close y el rango P10–P90.
 
 FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets, sin líneas en blanco):
-0) Título: 4–8 palabras, informativo. Prohibido escribir "sin dato".
+0) Título: DEBE ser exactamente uno de estos 3 (elige 1 según el caso):
+- "Postura Conservadora – Au"
+- "Postura Neutral – Au"
+- "Postura Flexible – Au"
+No inventes otros títulos.
 1) Comentario: un SOLO párrafo, y debe iniciar EXACTAMENTE así:
    "En base a |z|=__ y probabilidad __, se sugiere mantener una postura __ ..."
    Luego agrega 2–3 frases (máximo) con “un poco más de floro” orientado a negocio:

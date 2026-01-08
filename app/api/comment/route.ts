@@ -95,6 +95,14 @@ function normalizeRisksLine(raw: string) {
   return `Riesgos: ${s}`;
 }
 
+function normalizeTituloFromComentario(comentario: string): string {
+  const c = typeof comentario === "string" ? comentario : "";
+  if (/postura\s+conservadora/i.test(c)) return "Postura Conservadora – Au";
+  if (/postura\s+neutral/i.test(c)) return "Postura Neutral – Au";
+  if (/postura\s+flexible/i.test(c)) return "Postura Flexible – Au";
+  return "Postura de negociación – Au";
+}
+
 function toSimpleFromModel(obj: any): ApiCommentSimple {
   // Caso nuevo: {titulo, comentario, riesgos, confianza}
   const asNew = obj as ModelCommentNew;
@@ -322,6 +330,8 @@ export async function GET() {
 
     // ✅ Formato simple (tu objetivo)
     const simple: ApiCommentSimple = toSimpleFromModel(raw);
+    simple.titulo = normalizeTituloFromComentario(simple.comentario);
+
 
     // ✅ bullets legacy: si el modelo viejo manda puntos_clave, úsalo; si no, []
     const bulletsArr =

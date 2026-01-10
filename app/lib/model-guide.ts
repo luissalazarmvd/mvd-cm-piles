@@ -344,7 +344,7 @@ FORMATO OBLIGATORIO (exactamente 4 líneas, sin bullets, sin líneas en blanco):
 - "Postura Flexible – Au"
 No inventes otros títulos.
 1) Comentario: un SOLO párrafo, y debe iniciar EXACTAMENTE así:
-   "En base a |z|=__ y probabilidad __, se sugiere mantener una postura __ ..."
+   "En base a |z|=__ y probabilidad __, se sugiere mantener una postura __"
    Luego agrega 2–3 frases (máximo) con “un poco más de floro” orientado a negocio:
    - Debe incluir: proteger margen + condiciones comerciales (castigos/descuentos/límites).
    - Debe evitar jerga.

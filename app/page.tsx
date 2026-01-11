@@ -172,16 +172,16 @@ function DataTable({ rows }: { rows: LotRow[] }) {
             <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
               <td style={tdStyle}>{r.codigo ?? ""}</td>
               <td style={tdStyle}>{r.zona ?? ""}</td>
-              <td style={tdStyle}>{fmt(r.tmh, 3)}</td>
+              <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
               <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
-              <td style={tdStyle}>{fmt(r.tms, 3)}</td>
-              <td style={tdStyle}>{fmt(r.au_gr_ton, 3)}</td>
-              <td style={tdStyle}>{fmt(r.au_fino, 3)}</td>
-              <td style={tdStyle}>{fmt(r.ag_gr_ton, 3)}</td>
-              <td style={tdStyle}>{fmt(r.ag_fino, 3)}</td>
-              <td style={tdStyle}>{fmt(r.cu_pct, 3)}</td>
-              <td style={tdStyle}>{fmt(r.nacn_kg_t, 4)}</td>
-              <td style={tdStyle}>{fmt(r.naoh_kg_t, 4)}</td>
+              <td style={tdStyle}>{fmt(r.tms, 2)}</td>
+              <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
+              <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
+              <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
+              <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+              <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
+              <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
+              <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
               <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
             </tr>
           ))}

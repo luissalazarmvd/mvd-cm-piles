@@ -72,7 +72,6 @@ function w(r: LotRow) {
 
 function pileKPIs(rows: LotRow[]) {
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
-
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
 
   const auWeighted =
@@ -102,14 +101,6 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
 
-  const w = (r: LotRow) => {
-    const wTms = n(r.tms);
-    if (wTms > 0) return wTms;
-    // fallback por si hay filas sin tms
-    const wTmh = n(r.tmh);
-    return wTmh > 0 ? wTmh : 0;
-  };
-
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
 
   const wavg = (get: (r: LotRow) => number) =>
@@ -128,21 +119,48 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
   const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
 
+  // styles
+  const wrapStyle: React.CSSProperties = {
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,.25)",
+    overflow: "auto",
+    maxHeight: 420, // 👈 para que exista scroll y el TOTAL sticky tenga sentido
+    background: "rgba(0,0,0,.10)",
+  };
+
+  const thStyle: React.CSSProperties = {
+    textAlign: "left",
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,.2)",
+    whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+    zIndex: 3,
+    background: "rgba(0,0,0,.28)", // header sticky aesthetic
+    backdropFilter: "blur(6px)",
+  };
+
+  const tdStyle: React.CSSProperties = { padding: "8px 10px", whiteSpace: "nowrap" };
+
+  const tfootTd: React.CSSProperties = {
+    padding: "10px 10px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    position: "sticky",
+    bottom: 0,
+    zIndex: 2,
+    background: "rgba(0,0,0,.30)",
+    backdropFilter: "blur(6px)",
+    borderTop: "1px solid rgba(255,255,255,.25)",
+  };
+
   return (
-    <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid rgba(255,255,255,.25)" }}>
+    <div style={wrapStyle}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
-          <tr style={{ background: "rgba(0,0,0,.25)" }}>
+          <tr>
             {cols.map((c) => (
-              <th
-                key={c}
-                style={{
-                  textAlign: "left",
-                  padding: "10px 10px",
-                  borderBottom: "1px solid rgba(255,255,255,.2)",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <th key={c} style={thStyle}>
                 {c}
               </th>
             ))}
@@ -152,19 +170,19 @@ function DataTable({ rows }: { rows: LotRow[] }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-              <td style={{ padding: "8px 10px" }}>{r.codigo ?? ""}</td>
-              <td style={{ padding: "8px 10px" }}>{r.zona ?? ""}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.tmh, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.humedad_pct, 2)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.tms, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.au_gr_ton, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.au_fino, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.ag_gr_ton, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.ag_fino, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.cu_pct, 3)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.nacn_kg_t, 4)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.naoh_kg_t, 4)}</td>
-              <td style={{ padding: "8px 10px" }}>{fmt(r.rec_pct, 2)}</td>
+              <td style={tdStyle}>{r.codigo ?? ""}</td>
+              <td style={tdStyle}>{r.zona ?? ""}</td>
+              <td style={tdStyle}>{fmt(r.tmh, 3)}</td>
+              <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
+              <td style={tdStyle}>{fmt(r.tms, 3)}</td>
+              <td style={tdStyle}>{fmt(r.au_gr_ton, 3)}</td>
+              <td style={tdStyle}>{fmt(r.au_fino, 3)}</td>
+              <td style={tdStyle}>{fmt(r.ag_gr_ton, 3)}</td>
+              <td style={tdStyle}>{fmt(r.ag_fino, 3)}</td>
+              <td style={tdStyle}>{fmt(r.cu_pct, 3)}</td>
+              <td style={tdStyle}>{fmt(r.nacn_kg_t, 4)}</td>
+              <td style={tdStyle}>{fmt(r.naoh_kg_t, 4)}</td>
+              <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
             </tr>
           ))}
 
@@ -177,27 +195,29 @@ function DataTable({ rows }: { rows: LotRow[] }) {
           )}
         </tbody>
 
-        {/* SUBTOTALES */}
+        {/* SUBTOTALES (sticky abajo) */}
         {rows.length > 0 && (
           <tfoot>
-            <tr style={{ background: "rgba(0,0,0,.18)", borderTop: "1px solid rgba(255,255,255,.25)" }}>
-              <td style={{ padding: "10px 10px", fontWeight: 700, whiteSpace: "nowrap" }}>TOTAL</td>
-              <td style={{ padding: "10px 10px", color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
+            <tr>
+              <td style={tfootTd}>TOTAL</td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>
+                ({rows.length} lotes)
+              </td>
 
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{tmhSum.toFixed(3)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{humW.toFixed(2)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{tmsSum.toFixed(3)}</td>
+              <td style={tfootTd}>{tmhSum.toFixed(3)}</td>
+              <td style={tfootTd}>{humW.toFixed(2)}</td>
+              <td style={tfootTd}>{tmsSum.toFixed(3)}</td>
 
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{auW.toFixed(3)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{auFinoSum.toFixed(3)}</td>
+              <td style={tfootTd}>{auW.toFixed(3)}</td>
+              <td style={tfootTd}>{auFinoSum.toFixed(3)}</td>
 
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{agW.toFixed(3)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{agFinoSum.toFixed(3)}</td>
+              <td style={tfootTd}>{agW.toFixed(3)}</td>
+              <td style={tfootTd}>{agFinoSum.toFixed(3)}</td>
 
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{cuW.toFixed(3)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{nacnW.toFixed(4)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{naohW.toFixed(4)}</td>
-              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{recW.toFixed(2)}</td>
+              <td style={tfootTd}>{cuW.toFixed(3)}</td>
+              <td style={tfootTd}>{nacnW.toFixed(4)}</td>
+              <td style={tfootTd}>{naohW.toFixed(4)}</td>
+              <td style={tfootTd}>{recW.toFixed(2)}</td>
             </tr>
           </tfoot>
         )}
@@ -205,6 +225,8 @@ function DataTable({ rows }: { rows: LotRow[] }) {
     </div>
   );
 }
+
+type ViewKey = "1" | "2" | "3";
 
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
@@ -217,6 +239,8 @@ export default function Home() {
   const [r1, setR1] = useState<LotRow[]>([]);
   const [r2, setR2] = useState<LotRow[]>([]);
   const [r3, setR3] = useState<LotRow[]>([]);
+
+  const [view, setView] = useState<ViewKey>("1");
 
   useEffect(() => {
     try {
@@ -279,6 +303,37 @@ export default function Home() {
   const g2 = useMemo(() => groupByPile(r2), [r2]);
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
+  const current = view === "1" ? g1 : view === "2" ? g2 : g3;
+
+  const viewTitle =
+    view === "1"
+      ? "Resultado 1 – 1 pila Varios"
+      : view === "2"
+        ? "Resultado 2 – Pilas Batch (1..N)"
+        : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
+
+  const tabBtn = (k: ViewKey, label: string) => {
+    const active = view === k;
+    return (
+      <button
+        key={k}
+        onClick={() => setView(k)}
+        style={{
+          padding: "8px 12px",
+          borderRadius: 999,
+          border: "1px solid rgba(255,255,255,.25)",
+          background: active ? "rgba(255,255,255,.18)" : "rgba(0,0,0,.10)",
+          color: "white",
+          fontWeight: 700,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
+
   if (!authorized) {
     return (
       <main style={{
@@ -291,7 +346,7 @@ export default function Home() {
         color: "white",
         padding: 16,
       }}>
-        <div style={{ background: "#004F86", padding: 32, borderRadius: 8, width: 340, textAlign: "center" }}>
+        <div style={{ background: "#004F86", padding: 32, borderRadius: 10, width: 340, textAlign: "center" }}>
           <img src="/logo_mvd.png" alt="MVD" style={{ height: 48, marginBottom: 16 }} />
           <h2 style={{ marginBottom: 16 }}>Acceso Control de Pilas</h2>
 
@@ -301,12 +356,12 @@ export default function Home() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-            style={{ width: "100%", padding: 10, borderRadius: 4, border: "none", marginBottom: 12, outline: "none" }}
+            style={{ width: "100%", padding: 10, borderRadius: 6, border: "none", marginBottom: 12, outline: "none" }}
           />
 
           <button
             onClick={handleLogin}
-            style={{ width: "100%", padding: 10, borderRadius: 4, border: "none", background: "#A7D8FF", color: "#003A63", fontWeight: "bold", cursor: "pointer" }}
+            style={{ width: "100%", padding: 10, borderRadius: 6, border: "none", background: "#A7D8FF", color: "#003A63", fontWeight: "bold", cursor: "pointer" }}
           >
             Ingresar
           </button>
@@ -326,7 +381,7 @@ export default function Home() {
       minHeight: "100vh",
     }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src="/logo_mvd.png" alt="MVD" style={{ height: 48 }} />
           <h1 style={{ margin: 0 }}>MVD – Calculadora de Pilas</h1>
@@ -338,7 +393,7 @@ export default function Home() {
             disabled={loading}
             style={{
               padding: "8px 12px",
-              borderRadius: 6,
+              borderRadius: 8,
               border: "none",
               background: "#A7D8FF",
               color: "#003A63",
@@ -354,7 +409,7 @@ export default function Home() {
             onClick={handleLogout}
             style={{
               padding: "8px 12px",
-              borderRadius: 6,
+              borderRadius: 8,
               border: "none",
               background: "#A7D8FF",
               color: "#003A63",
@@ -368,36 +423,32 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {tabBtn("1", "Resultado 1")}
+        {tabBtn("2", "Resultado 2")}
+        {tabBtn("3", "Resultado 3")}
+      </div>
+
       {loadError && <p style={{ color: "#FFD6D6", margin: "8px 0 14px 0" }}>❌ {loadError}</p>}
 
-      {/* Resultado 1 */}
       <section style={{ marginBottom: 22 }}>
-        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 1 – 1 pila Varios</h2>
-        {g1.map(({ pile_code, pile_type, lotes }) => {
-          const k = pileKPIs(lotes);
-          return (
-            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-                <b>Pila #{pile_code} ({pile_type})</b>
-                <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
-                </span>
-              </div>
-              <DataTable rows={lotes} />
-            </div>
-          );
-        })}
-        {g1.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
-      </section>
+        <h2 style={{ margin: "0 0 10px 0" }}>{viewTitle}</h2>
 
-      {/* Resultado 2 */}
-      <section style={{ marginBottom: 22 }}>
-        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 2 – Pilas Batch (1..N)</h2>
-        {g2.map(({ pile_code, pile_type, lotes }) => {
+        {current.map(({ pile_code, pile_type, lotes }) => {
           const k = pileKPIs(lotes);
           return (
-            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+            <div
+              key={`${pile_code}-${pile_type}`}
+              style={{
+                marginBottom: 14,
+                background: "#004F86",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,.12)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
                 <b>Pila #{pile_code} ({pile_type})</b>
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
                   TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
@@ -407,27 +458,10 @@ export default function Home() {
             </div>
           );
         })}
-        {g2.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
-      </section>
 
-      {/* Resultado 3 */}
-      <section style={{ marginBottom: 22 }}>
-        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 3 – Mixto (1 Varios + 1 Batch)</h2>
-        {g3.map(({ pile_code, pile_type, lotes }) => {
-          const k = pileKPIs(lotes);
-          return (
-            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-                <b>Pila #{pile_code} ({pile_type})</b>
-                <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
-                </span>
-              </div>
-              <DataTable rows={lotes} />
-            </div>
-          );
-        })}
-        {g3.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
+        {current.length === 0 && (
+          <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>
+        )}
       </section>
     </main>
   );

@@ -1,133 +1,153 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const PASSWORD = "MVDML_123";
 
-type CommentLegacy = {
-  headline?: string;
-  bullets?: string[];
-  interpretation?: string;
-  risks?: string[];
-  confidence?: "Baja" | "Media" | "Alta" | string;
+type PileType = "batch" | "varios";
+
+type LotRow = {
+  id?: number;
+  pile_code?: number;
+  pile_type?: PileType;
+
+  codigo?: string;
+  zona?: string;
+
+  tmh?: number | string;
+  humedad_pct?: number | string;
+  tms?: number | string;
+
+  au_oz_tc?: number | string;
+  au_gr_ton?: number | string;
+  au_fino?: number | string;
+
+  ag_oz_tc?: number | string;
+  ag_gr_ton?: number | string;
+  ag_fino?: number | string;
+
+  cu_pct?: number | string;
+  nacn_kg_t?: number | string;
+  naoh_kg_t?: number | string;
+  rec_pct?: number | string;
+
+  loaded_at?: string;
+  created_at?: string;
 };
 
-type CommentSimple = {
-  titulo?: string;
-  comentario?: string;
-  riesgos?: string; // "Riesgos: a; b"
-  confianza?: "Baja" | "Media" | "Alta" | string;
-};
+function n(x: any): number {
+  const v = typeof x === "number" ? x : Number(x);
+  return Number.isFinite(v) ? v : 0;
+}
 
-// el API puede devolver cualquiera
-type CommentJSON = CommentLegacy | CommentSimple;
+function fmt(x: any, d = 2) {
+  const v = n(x);
+  return v === 0 && (x === null || x === undefined || x === "") ? "" : v.toFixed(d);
+}
+
+function groupByPile(rows: LotRow[]) {
+  const map = new Map<string, LotRow[]>();
+  for (const r of rows) {
+    const code = r.pile_code ?? 0;
+    const type = (r.pile_type ?? "varios") as PileType;
+    const k = `${code}__${type}`;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(r);
+  }
+  return Array.from(map.entries())
+    .map(([k, lotes]) => {
+      const [pile_code_s, pile_type] = k.split("__");
+      return { pile_code: Number(pile_code_s), pile_type: pile_type as PileType, lotes };
+    })
+    .sort((a, b) => (a.pile_code - b.pile_code) || a.pile_type.localeCompare(b.pile_type));
+}
+
+function pileKPIs(rows: LotRow[]) {
+  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
+  const auWeighted = tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.au_gr_ton), 0) / tmsSum : 0;
+  const humWeighted = tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.humedad_pct), 0) / tmsSum : 0;
+
+  // rec ponderada por Au_fino (más defendible)
+  const auFinesSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const recWeighted = auFinesSum > 0
+    ? rows.reduce((acc, r) => acc + n(r.au_fino) * n(r.rec_pct), 0) / auFinesSum
+    : (tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.rec_pct), 0) / tmsSum : 0);
+
+  return { tmsSum, auWeighted, humWeighted, recWeighted };
+}
+
+function DataTable({ rows }: { rows: LotRow[] }) {
+  const cols = [
+    "codigo", "zona", "tmh", "humedad_pct", "tms",
+    "au_gr_ton", "au_fino",
+    "ag_gr_ton", "ag_fino",
+    "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+  ] as const;
+
+  return (
+    <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid rgba(255,255,255,.25)" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: "rgba(0,0,0,.25)" }}>
+            {cols.map((c) => (
+              <th key={c} style={{ textAlign: "left", padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,.2)" }}>
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+              <td style={{ padding: "8px 10px" }}>{r.codigo ?? ""}</td>
+              <td style={{ padding: "8px 10px" }}>{r.zona ?? ""}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.tmh, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.humedad_pct, 2)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.tms, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.au_gr_ton, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.au_fino, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.ag_gr_ton, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.ag_fino, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.cu_pct, 3)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.nacn_kg_t, 4)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.naoh_kg_t, 4)}</td>
+              <td style={{ padding: "8px 10px" }}>{fmt(r.rec_pct, 2)}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={cols.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
+                Sin datos.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
 
-  // Comentario IA
-  const [aiLoading, setAiLoading] = useState(true);
-  const [aiError, setAiError] = useState<string>("");
-  const [aiComment, setAiComment] = useState<CommentJSON | null>(null);
-  const [aiProb, setAiProb] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
-  async function loadAIComment() {
-    setAiLoading(true);
-    setAiError("");
-    try {
-      const res = await fetch("/api/comment", { cache: "no-store" });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j?.error || "Error");
-      const probRaw = j?.probability ?? j?.snapshot?.scenarios?.probability;
-const prob = typeof probRaw === "number" ? probRaw : Number(probRaw);
-setAiProb(Number.isFinite(prob) ? prob : null);
+  const [r1, setR1] = useState<LotRow[]>([]);
+  const [r2, setR2] = useState<LotRow[]>([]);
+  const [r3, setR3] = useState<LotRow[]>([]);
 
-
-
-      // Preferir el formato nuevo si existe; sino el legacy
-      setAiComment(j.comment_simple ?? j.comment ?? null);
-    } catch (e: any) {
-      setAiError(e?.message || "Error");
-      setAiComment(null);
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  // 1) Mantener sesión (solo corre en cliente)
   useEffect(() => {
     try {
-      if (sessionStorage.getItem("mvd_auth") === "ok") {
-        setAuthorized(true);
-      }
+      if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
     } catch {}
   }, []);
 
-  // 1.1) Cargar comentario IA cuando está autorizado
-  useEffect(() => {
-    if (!authorized) return;
-    loadAIComment();
-  }, [authorized]);
-
-  // 2) Cargar TradingView SOLO cuando ya está autorizado
-  useEffect(() => {
-    if (!authorized) return;
-
-    const containerId = "tradingview-widget";
-
-    const initWidget = () => {
-      const el = document.getElementById(containerId);
-      // @ts-ignore
-      if (!window.TradingView || !el) return;
-
-      // Evita duplicados si React re-renderiza
-      el.innerHTML = "";
-
-      // @ts-ignore
-      new window.TradingView.widget({
-        container_id: containerId,
-
-        // Principal
-        symbol: "OANDA:XAUUSD",
-
-        // Comparación por default
-        compare_symbols: [{ symbol: "OANDA:XAGUSD", position: "SameScale" }],
-
-        interval: "D",
-        theme: "dark",
-        style: "1",
-        locale: "en",
-        width: "100%",
-        height: 700,
-
-        allow_symbol_change: true,
-        studies: ["MACD@tv-basicstudies", "RSI@tv-basicstudies"],
-      });
-    };
-
-    // Si ya existe el script, solo inicializa
-    if (document.getElementById("tradingview-script")) {
-      initWidget();
-      return;
-    }
-
-    // Si no existe, lo creas
-    const script = document.createElement("script");
-    script.id = "tradingview-script";
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-    script.onload = initWidget;
-
-    document.body.appendChild(script);
-  }, [authorized]);
-
   const handleLogin = () => {
     if (input === PASSWORD) {
-      try {
-        sessionStorage.setItem("mvd_auth", "ok");
-      } catch {}
+      try { sessionStorage.setItem("mvd_auth", "ok"); } catch {}
       setAuthorized(true);
       setError("");
     } else {
@@ -136,394 +156,199 @@ setAiProb(Number.isFinite(prob) ? prob : null);
   };
 
   const handleLogout = () => {
-    try {
-      sessionStorage.removeItem("mvd_auth");
-    } catch {}
+    try { sessionStorage.removeItem("mvd_auth"); } catch {}
     setAuthorized(false);
     setInput("");
     setError("");
   };
 
-  // LOGIN UI
+  async function loadAll() {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [a, b, c] = await Promise.all([
+        fetch("/api/pilas?which=1", { cache: "no-store" }),
+        fetch("/api/pilas?which=2", { cache: "no-store" }),
+        fetch("/api/pilas?which=3", { cache: "no-store" }),
+      ]);
+
+      const ja = await a.json();
+      const jb = await b.json();
+      const jc = await c.json();
+
+      if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
+      if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
+      if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
+
+      setR1(Array.isArray(ja) ? ja : []);
+      setR2(Array.isArray(jb) ? jb : []);
+      setR3(Array.isArray(jc) ? jc : []);
+    } catch (e: any) {
+      setLoadError(e?.message || "Error");
+      setR1([]); setR2([]); setR3([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!authorized) return;
+    loadAll();
+  }, [authorized]);
+
+  const g1 = useMemo(() => groupByPile(r1), [r1]);
+  const g2 = useMemo(() => groupByPile(r2), [r2]);
+  const g3 = useMemo(() => groupByPile(r3), [r3]);
+
   if (!authorized) {
     return (
-      <main
-        style={{
-          minHeight: "100vh",
-          backgroundColor: "#0067AC",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          fontFamily: "Arial, sans-serif",
-          color: "white",
-          padding: 16,
-        }}
-      >
-        <div
-          style={{
-            background: "#004F86",
-            padding: 32,
-            borderRadius: 8,
-            width: 340,
-            textAlign: "center",
-          }}
-        >
-          <img
-            src="/logo_mvd.png"
-            alt="MVD"
-            style={{ height: 48, marginBottom: 16 }}
-          />
-
-          <h2 style={{ marginBottom: 16 }}>Acceso MVD</h2>
+      <main style={{
+        minHeight: "100vh",
+        backgroundColor: "#0067AC",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        fontFamily: "Arial, sans-serif",
+        color: "white",
+        padding: 16,
+      }}>
+        <div style={{ background: "#004F86", padding: 32, borderRadius: 8, width: 340, textAlign: "center" }}>
+          <img src="/logo_mvd.png" alt="MVD" style={{ height: 48, marginBottom: 16 }} />
+          <h2 style={{ marginBottom: 16 }}>Acceso Control de Pilas</h2>
 
           <input
             type="password"
             placeholder="Contraseña"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleLogin();
-            }}
-            style={{
-              width: "100%",
-              padding: 10,
-              borderRadius: 4,
-              border: "none",
-              marginBottom: 12,
-              outline: "none",
-            }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+            style={{ width: "100%", padding: 10, borderRadius: 4, border: "none", marginBottom: 12, outline: "none" }}
           />
 
           <button
             onClick={handleLogin}
-            style={{
-              width: "100%",
-              padding: 10,
-              borderRadius: 4,
-              border: "none",
-              background: "#A7D8FF",
-              color: "#003A63",
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
+            style={{ width: "100%", padding: 10, borderRadius: 4, border: "none", background: "#A7D8FF", color: "#003A63", fontWeight: "bold", cursor: "pointer" }}
           >
             Ingresar
           </button>
 
-          {error && (
-            <p style={{ color: "#FFD6D6", marginTop: 12 }}>{error}</p>
-          )}
+          {error && <p style={{ color: "#FFD6D6", marginTop: 12 }}>{error}</p>}
         </div>
       </main>
     );
   }
 
-  // DASHBOARD UI
   return (
-    <main
-      style={{
-        padding: 16,
-        fontFamily: "Arial, sans-serif",
-        backgroundColor: "#0067AC",
-        color: "white",
-        minHeight: "100vh",
-      }}
-    >
+    <main style={{
+      padding: 16,
+      fontFamily: "Arial, sans-serif",
+      backgroundColor: "#0067AC",
+      color: "white",
+      minHeight: "100vh",
+    }}>
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src="/logo_mvd.png" alt="MVD" style={{ height: 48 }} />
-          <h1 style={{ margin: 0 }}>MVD – ML Dashboard (Market Data)</h1>
+          <h1 style={{ margin: 0 }}>MVD – Calculadora de Pilas</h1>
         </div>
 
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 6,
-            border: "none",
-            background: "#A7D8FF",
-            color: "#003A63",
-            fontWeight: "bold",
-            cursor: "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Cerrar sesión
-        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={loadAll}
+            disabled={loading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: loading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {loading ? "Cargando..." : "Actualizar"}
+          </button>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </div>
 
-      {/* Power BI */}
-      <section style={{ marginBottom: 18 }}>
-        <h2 style={{ marginBottom: 8 }}>Power BI – Señales y ML</h2>
+      {loadError && <p style={{ color: "#FFD6D6", margin: "8px 0 14px 0" }}>❌ {loadError}</p>}
 
-        <iframe
-          title="Power BI Dashboard"
-          src="https://app.powerbi.com/view?r=eyJrIjoiYzg4MDI3YjItMzNmYy00MTY0LTg5YzYtYWYzNjA0MTdhNmM0IiwidCI6IjYzNzhiZmNkLWRjYjktNDMwZi05Nzc4LWRiNTk3NGRjMmFkYyIsImMiOjR9"
-          style={{
-            width: "100%",
-            height: "70vh",
-            border: "none",
-            borderRadius: 8,
-            background: "white",
-          }}
-          allowFullScreen
-        />
-      </section>
-
-      {/* Comentario */}
-      <section style={{ marginBottom: 28 }}>
-        <div
-          style={{
-            borderRadius: 8,
-            border: "2px solid #c69214",
-            background: "#004F86",
-            padding: 14,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              marginBottom: 10,
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Comentario (Macro + Señal + Forecast)</h2>
-
-            <button
-              onClick={loadAIComment}
-              disabled={aiLoading}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "none",
-                background: "#A7D8FF",
-                color: "#003A63",
-                fontWeight: "bold",
-                cursor: aiLoading ? "not-allowed" : "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {aiLoading ? "Generando..." : "Actualizar"}
-            </button>
-          </div>
-
-          {aiError && (
-            <p style={{ color: "#FFD6D6", margin: 0 }}>❌ {aiError}</p>
-          )}
-
-          {!aiError && aiLoading && (
-            <p style={{ margin: 0, color: "#D8EEFF" }}>
-              Generando comentario con IA…
-            </p>
-          )}
-
-          {!aiError && !aiLoading && aiComment && (() => {
-            const c: any = aiComment;
-
-            // title: legacy.headline || simple.titulo
-            const title =
-              (typeof c?.headline === "string" && c.headline.trim()) ? c.headline :
-              (typeof c?.titulo === "string" && c.titulo.trim()) ? c.titulo :
-              "Comentario IA";
-
-            // main: legacy.interpretation || simple.comentario
-            const mainText =
-              (typeof c?.interpretation === "string" && c.interpretation.trim()) ? c.interpretation :
-              (typeof c?.comentario === "string" && c.comentario.trim()) ? c.comentario :
-              "";
-
-            // bullets: legacy only
-            const bullets = Array.isArray(c?.bullets) ? c.bullets : [];
-
-            // risks: legacy.risks[] or simple.riesgos string
-            const risksArr = Array.isArray(c?.risks)
-              ? c.risks
-              : (typeof c?.riesgos === "string"
-                  ? c.riesgos
-                      .replace(/^Riesgos:\s*/i, "")
-                      .split(";")
-                      .map((s: string) => s.trim())
-                      .filter(Boolean)
-                  : []);
-
-            // confidence: legacy.confidence || simple.confianza
-            const conf =
-              (c?.confidence === "Baja" || c?.confidence === "Media" || c?.confidence === "Alta") ? c.confidence :
-              (c?.confianza === "Baja" || c?.confianza === "Media" || c?.confianza === "Alta") ? c.confianza :
-              "Baja";
-
-            return (
-              <div style={{ marginTop: 8 }}>
-                <h3 style={{ margin: "0 0 8px 0" }}>{title}</h3>
-
-                {bullets.length > 0 && (
-                  <ul style={{ margin: "0 0 10px 18px" }}>
-                    {bullets.map((b: string, i: number) => (
-                      <li key={i} style={{ marginBottom: 6 }}>
-                        {b}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {mainText && (
-                  <p style={{ margin: "0 0 8px 0" }}>
-                    <b>Comentario:</b> {mainText}
-                  </p>
-                )}
-
-                {risksArr.length > 0 && (
-                  <p style={{ margin: "0 0 8px 0" }}>
-                    <b>Riesgos:</b> {risksArr.join(" · ")}
-                  </p>
-                )}
-
-                <p style={{ margin: 0 }}>
-                <b>Confianza:</b> {conf}
-                {aiProb != null
-                ? ` (prob=${(aiProb * 100).toFixed(1)}%)`
-                : " (prob=sin dato)"}
-                </p>
-
+      {/* Resultado 1 */}
+      <section style={{ marginBottom: 22 }}>
+        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 1 – 1 pila Varios</h2>
+        {g1.map(({ pile_code, pile_type, lotes }) => {
+          const k = pileKPIs(lotes);
+          return (
+            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                <b>Pila #{pile_code} ({pile_type})</b>
+                <span style={{ color: "rgba(255,255,255,.85)" }}>
+                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                </span>
               </div>
-            );
-          })()}
-        </div>
-
-        <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
-          Nota: comentario automático basado en datos del modelo (z-score, señal,
-          probabilidad, VIX/DXY/Y10 y forecast de Au). Con tecnología de OpenAI.
-        </p>
+              <DataTable rows={lotes} />
+            </div>
+          );
+        })}
+        {g1.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>
 
-      {/* TradingView */}
-      <section style={{ marginBottom: 28 }}>
-        <h2 style={{ marginBottom: 8 }}>Mercado – Oro / Índices</h2>
-
-        <div
-          id="tradingview-widget"
-          style={{
-            width: "100%",
-            height: 700,
-            borderRadius: 8,
-            overflow: "hidden",
-            background: "#000",
-          }}
-        />
-
-        <a
-          href="https://www.tradingview.com/chart/?symbol=OANDA:XAUUSD"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-block",
-            marginTop: 10,
-            color: "#A7D8FF",
-            fontSize: 14,
-            textDecoration: "none",
-          }}
-        >
-          Abrir en TradingView (análisis completo)
-        </a>
+      {/* Resultado 2 */}
+      <section style={{ marginBottom: 22 }}>
+        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 2 – Pilas Batch (1..N)</h2>
+        {g2.map(({ pile_code, pile_type, lotes }) => {
+          const k = pileKPIs(lotes);
+          return (
+            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                <b>Pila #{pile_code} ({pile_type})</b>
+                <span style={{ color: "rgba(255,255,255,.85)" }}>
+                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                </span>
+              </div>
+              <DataTable rows={lotes} />
+            </div>
+          );
+        })}
+        {g2.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>
 
-      {/* Matriz señal - confianza - acción */}
-      <section style={{ marginTop: 18 }}>
-        <h2 style={{ marginBottom: 10 }}>Matriz señal – confianza – acción</h2>
-
-        <div
-          style={{
-            width: "100%",
-            borderRadius: 8,
-            overflow: "hidden",
-            border: "2px solid #c69214",
-            background: "#0067ac",
-          }}
-        >
-          {/* Header row */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "120px 170px 1fr 1.2fr",
-              gap: 0,
-              borderBottom: "2px solid #c69214",
-              fontWeight: 700,
-              padding: "12px 12px",
-            }}
-          >
-            <div>Señal</div>
-            <div>Nivel de Confianza</div>
-            <div>Interpretación</div>
-            <div>Acción recomendada</div>
-          </div>
-
-          {/* Row -1 */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "120px 170px 1fr 1.2fr",
-              gap: 0,
-              padding: "14px 12px",
-              borderBottom: "1px solid #c69214",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ fontWeight: 700 }}>-1</div>
-            <div style={{ fontWeight: 700 }}>{">"}60%</div>
-            <div>Mercado desfavorable / riesgo elevado</div>
-            <div>Aumentar castigos de negociación y reducir exposición</div>
-          </div>
-
-          {/* Row 0 */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "120px 170px 1fr 1.2fr",
-              gap: 0,
-              padding: "14px 12px",
-              borderBottom: "1px solid #c69214",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ fontWeight: 700 }}>0</div>
-            <div style={{ fontWeight: 700 }}>-</div>
-            <div>Sin señal clara</div>
-            <div>Mantener condiciones estándar</div>
-          </div>
-
-          {/* Row 1 */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "120px 170px 1fr 1.2fr",
-              gap: 0,
-              padding: "14px 12px",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ fontWeight: 700 }}>1</div>
-            <div style={{ fontWeight: 700 }}>{">"}60%</div>
-            <div>Mercado favorable / riesgo controlado</div>
-            <div>Ofrecer condiciones más competitivas para captar volumen</div>
-          </div>
-        </div>
-
-        {/* Nota opcional (chiquita) */}
-        <p style={{ marginTop: 10, fontSize: 12, color: "#D8EEFF" }}>
-          Nota: el umbral de confianza se interpreta como probabilidad mínima
-          recomendada para ejecutar la acción.
-        </p>
+      {/* Resultado 3 */}
+      <section style={{ marginBottom: 22 }}>
+        <h2 style={{ margin: "0 0 10px 0" }}>Resultado 3 – Mixto (1 Varios + 1 Batch)</h2>
+        {g3.map(({ pile_code, pile_type, lotes }) => {
+          const k = pileKPIs(lotes);
+          return (
+            <div key={`${pile_code}-${pile_type}`} style={{ marginBottom: 14, background: "#004F86", padding: 12, borderRadius: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                <b>Pila #{pile_code} ({pile_type})</b>
+                <span style={{ color: "rgba(255,255,255,.85)" }}>
+                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                </span>
+              </div>
+              <DataTable rows={lotes} />
+            </div>
+          );
+        })}
+        {g3.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>
     </main>
   );

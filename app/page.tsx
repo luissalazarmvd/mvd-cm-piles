@@ -204,19 +204,19 @@ function DataTable({ rows }: { rows: LotRow[] }) {
                 ({rows.length} lotes)
               </td>
 
-              <td style={tfootTd}>{tmhSum.toFixed(3)}</td>
+              <td style={tfootTd}>{tmhSum.toFixed(2)}</td>
               <td style={tfootTd}>{humW.toFixed(2)}</td>
-              <td style={tfootTd}>{tmsSum.toFixed(3)}</td>
+              <td style={tfootTd}>{tmsSum.toFixed(2)}</td>
 
-              <td style={tfootTd}>{auW.toFixed(3)}</td>
-              <td style={tfootTd}>{auFinoSum.toFixed(3)}</td>
+              <td style={tfootTd}>{auW.toFixed(2)}</td>
+              <td style={tfootTd}>{auFinoSum.toFixed(2)}</td>
 
-              <td style={tfootTd}>{agW.toFixed(3)}</td>
-              <td style={tfootTd}>{agFinoSum.toFixed(3)}</td>
+              <td style={tfootTd}>{agW.toFixed(2)}</td>
+              <td style={tfootTd}>{agFinoSum.toFixed(2)}</td>
 
-              <td style={tfootTd}>{cuW.toFixed(3)}</td>
-              <td style={tfootTd}>{nacnW.toFixed(4)}</td>
-              <td style={tfootTd}>{naohW.toFixed(4)}</td>
+              <td style={tfootTd}>{cuW.toFixed(2)}</td>
+              <td style={tfootTd}>{nacnW.toFixed(2)}</td>
+              <td style={tfootTd}>{naohW.toFixed(2)}</td>
               <td style={tfootTd}>{recW.toFixed(2)}</td>
             </tr>
           </tfoot>

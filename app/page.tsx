@@ -99,6 +99,35 @@ function DataTable({ rows }: { rows: LotRow[] }) {
     "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
   ] as const;
 
+  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
+  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+
+  const w = (r: LotRow) => {
+    const wTms = n(r.tms);
+    if (wTms > 0) return wTms;
+    // fallback por si hay filas sin tms
+    const wTmh = n(r.tmh);
+    return wTmh > 0 ? wTmh : 0;
+  };
+
+  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
+
+  const wavg = (get: (r: LotRow) => number) =>
+    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
+
+  // ponderados por TMS (o TMH fallback)
+  const humW = wavg((r) => n(r.humedad_pct));
+  const auW = wavg((r) => n(r.au_gr_ton));
+  const agW = wavg((r) => n(r.ag_gr_ton));
+  const cuW = wavg((r) => n(r.cu_pct));
+  const nacnW = wavg((r) => n(r.nacn_kg_t));
+  const naohW = wavg((r) => n(r.naoh_kg_t));
+  const recW = wavg((r) => n(r.rec_pct));
+
+  // finos: suma directa
+  const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+
   return (
     <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid rgba(255,255,255,.25)" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -111,6 +140,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
                   textAlign: "left",
                   padding: "10px 10px",
                   borderBottom: "1px solid rgba(255,255,255,.2)",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {c}
@@ -118,6 +148,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
             ))}
           </tr>
         </thead>
+
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
@@ -136,6 +167,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
               <td style={{ padding: "8px 10px" }}>{fmt(r.rec_pct, 2)}</td>
             </tr>
           ))}
+
           {rows.length === 0 && (
             <tr>
               <td colSpan={cols.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
@@ -144,6 +176,31 @@ function DataTable({ rows }: { rows: LotRow[] }) {
             </tr>
           )}
         </tbody>
+
+        {/* SUBTOTALES */}
+        {rows.length > 0 && (
+          <tfoot>
+            <tr style={{ background: "rgba(0,0,0,.18)", borderTop: "1px solid rgba(255,255,255,.25)" }}>
+              <td style={{ padding: "10px 10px", fontWeight: 700, whiteSpace: "nowrap" }}>TOTAL</td>
+              <td style={{ padding: "10px 10px", color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
+
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{tmhSum.toFixed(3)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{humW.toFixed(2)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{tmsSum.toFixed(3)}</td>
+
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{auW.toFixed(3)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{auFinoSum.toFixed(3)}</td>
+
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{agW.toFixed(3)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{agFinoSum.toFixed(3)}</td>
+
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{cuW.toFixed(3)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{nacnW.toFixed(4)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{naohW.toFixed(4)}</td>
+              <td style={{ padding: "10px 10px", fontWeight: 700 }}>{recW.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );

@@ -62,18 +62,33 @@ function groupByPile(rows: LotRow[]) {
     .sort((a, b) => (a.pile_code - b.pile_code) || a.pile_type.localeCompare(b.pile_type));
 }
 
+// peso para ponderados: prioriza TMS; si no hay, usa TMH
+function w(r: LotRow) {
+  const tms = n(r.tms);
+  if (tms > 0) return tms;
+  const tmh = n(r.tmh);
+  return tmh > 0 ? tmh : 0;
+}
+
 function pileKPIs(rows: LotRow[]) {
-  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
-  const auWeighted = tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.au_gr_ton), 0) / tmsSum : 0;
-  const humWeighted = tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.humedad_pct), 0) / tmsSum : 0;
+  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
 
-  // rec ponderada por Au_fino (más defendible)
+  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
+
+  const auWeighted =
+    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.au_gr_ton), 0) / wSum : 0;
+
+  const humWeighted =
+    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
+
+  // rec ponderada por Au_fino (si existe y >0), si no por w()
   const auFinesSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
-  const recWeighted = auFinesSum > 0
-    ? rows.reduce((acc, r) => acc + n(r.au_fino) * n(r.rec_pct), 0) / auFinesSum
-    : (tmsSum > 0 ? rows.reduce((acc, r) => acc + n(r.tms) * n(r.rec_pct), 0) / tmsSum : 0);
+  const recWeighted =
+    auFinesSum > 0
+      ? rows.reduce((acc, r) => acc + n(r.au_fino) * n(r.rec_pct), 0) / auFinesSum
+      : (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0);
 
-  return { tmsSum, auWeighted, humWeighted, recWeighted };
+  return { tmhSum, auWeighted, humWeighted, recWeighted };
 }
 
 function DataTable({ rows }: { rows: LotRow[] }) {
@@ -90,7 +105,14 @@ function DataTable({ rows }: { rows: LotRow[] }) {
         <thead>
           <tr style={{ background: "rgba(0,0,0,.25)" }}>
             {cols.map((c) => (
-              <th key={c} style={{ textAlign: "left", padding: "10px 10px", borderBottom: "1px solid rgba(255,255,255,.2)" }}>
+              <th
+                key={c}
+                style={{
+                  textAlign: "left",
+                  padding: "10px 10px",
+                  borderBottom: "1px solid rgba(255,255,255,.2)",
+                }}
+              >
                 {c}
               </th>
             ))}
@@ -180,9 +202,9 @@ export default function Home() {
       if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
       if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
 
-      setR1(Array.isArray(ja) ? ja : []);
-      setR2(Array.isArray(jb) ? jb : []);
-      setR3(Array.isArray(jc) ? jc : []);
+      setR1(Array.isArray(ja?.rows) ? ja.rows : []);
+      setR2(Array.isArray(jb?.rows) ? jb.rows : []);
+      setR3(Array.isArray(jc?.rows) ? jc.rows : []);
     } catch (e: any) {
       setLoadError(e?.message || "Error");
       setR1([]); setR2([]); setR3([]);
@@ -301,7 +323,7 @@ export default function Home() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
                 <b>Pila #{pile_code} ({pile_type})</b>
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
                 </span>
               </div>
               <DataTable rows={lotes} />
@@ -321,7 +343,7 @@ export default function Home() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
                 <b>Pila #{pile_code} ({pile_type})</b>
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
                 </span>
               </div>
               <DataTable rows={lotes} />
@@ -341,7 +363,7 @@ export default function Home() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
                 <b>Pila #{pile_code} ({pile_type})</b>
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMS={k.tmsSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
                 </span>
               </div>
               <DataTable rows={lotes} />

@@ -384,7 +384,7 @@ export default function Home() {
       <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <img src="/logo_mvd.png" alt="MVD" style={{ height: 48 }} />
-          <h1 style={{ margin: 0 }}>MVD – Calculadora de Pilas</h1>
+          <h1 style={{ margin: 0 }}>MVD – Calculadora de Blending</h1>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

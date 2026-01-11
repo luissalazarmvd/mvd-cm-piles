@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const PASSWORD = "MVDML_123";
+const PASSWORD = process.env.NEXT_PUBLIC_WEB_PASS || "";
 
 type PileType = "batch" | "varios";
 

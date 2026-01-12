@@ -380,6 +380,37 @@ async function fetchImageAsDataURL(url: string): Promise<string> {
   });
 }
 
+async function getImageNaturalSize(dataUrl: string): Promise<{ w: number; h: number }> {
+  return await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height });
+    img.onerror = () => reject(new Error("No se pudo leer tamaño de imagen"));
+    img.src = dataUrl;
+  });
+}
+
+function addImageContain(params: {
+  doc: jsPDF;
+  dataUrl: string;
+  x: number;
+  y: number;
+  maxW: number;
+  maxH: number;
+  naturalW: number;
+  naturalH: number;
+}) {
+  const { doc, dataUrl, x, y, maxW, maxH, naturalW, naturalH } = params;
+
+  if (!naturalW || !naturalH) return;
+
+  const s = Math.min(maxW / naturalW, maxH / naturalH, 1);
+  const w = naturalW * s;
+  const h = naturalH * s;
+
+  doc.addImage(dataUrl, "PNG", x, y, w, h); // ratio intacto
+}
+
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -537,134 +568,151 @@ export default function Home() {
 
   // ✅ EXPORT PDF (solo la vista seleccionada: 1,2 o 3)
   async function exportCurrentToPDF() {
-    setExportLoading(true);
-    try {
-      const piles = current;
-      if (!piles || piles.length === 0) {
-        alert("Sin datos para exportar.");
-        return;
+  setExportLoading(true);
+  try {
+    const piles = current;
+    if (!piles || piles.length === 0) {
+      alert("Sin datos para exportar.");
+      return;
+    }
+
+    const pileDate = getPileDateFromRows(flatCurrentRows);
+    const dateStr = formatDDMMYYYY(pileDate);
+
+    // logo: public/export_logo.png
+    const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
+    const logoSize = logoDataUrl ? await getImageNaturalSize(logoDataUrl).catch(() => ({ w: 0, h: 0 })) : { w: 0, h: 0 };
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    const headerH = 60;
+    const marginX = 28;
+
+    const drawHeader = () => {
+      // Logo izquierda (SIN deformar)
+      if (logoDataUrl && logoSize.w > 0 && logoSize.h > 0) {
+        addImageContain({
+          doc,
+          dataUrl: logoDataUrl,
+          x: marginX,
+          y: 12,
+          maxW: 140,   // box max
+          maxH: 40,    // box max
+          naturalW: logoSize.w,
+          naturalH: logoSize.h,
+        });
       }
 
-      const pileDate = getPileDateFromRows(flatCurrentRows);
-      const dateStr = formatDDMMYYYY(pileDate);
+      // Texto centro
+      const title = `Fecha de Pila: ${dateStr}`;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(title, pageW / 2, 34, { align: "center" });
 
-      // logo: public/export_logo.png
-      const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
+      // línea inferior header
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.8);
+      doc.line(marginX, headerH, pageW - marginX, headerH);
+    };
 
-      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
+    const makeBodyRows = (rows: LotRow[]) =>
+      rows.map((r) => [
+        r.codigo ?? "",
+        r.zona ?? "",
+        fmt(r.tmh, 2),
+        fmt(r.humedad_pct, 2),
+        fmt(r.tms, 2),
+        fmt(r.au_gr_ton, 2),
+        fmt(r.au_fino, 2),
+        fmt(r.ag_gr_ton, 2),
+        fmt(r.ag_fino, 2),
+        fmt(r.cu_pct, 2),
+        fmt(r.nacn_kg_t, 2),
+        fmt(r.naoh_kg_t, 2),
+        fmt(r.rec_pct, 2),
+      ]);
 
-      const headerH = 60;
-      const marginX = 28;
+    const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
 
-      const drawHeader = () => {
-        // Logo izquierda
-        if (logoDataUrl) {
-          // ajusta tamaño si quieres
-          doc.addImage(logoDataUrl, "PNG", marginX, 14, 90, 32);
-        }
+    piles.forEach((p, idx) => {
+      if (idx > 0) doc.addPage();
 
-        // Texto centro
-        const title = `Fecha de Pila: ${dateStr}`;
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        const tw = doc.getTextWidth(title);
-        doc.text(title, (pageW - tw) / 2, 34);
+      drawHeader();
 
-        // línea inferior header
-        doc.setDrawColor(180);
-        doc.setLineWidth(0.8);
-        doc.line(marginX, headerH, pageW - marginX, headerH);
-      };
+      // subtítulo pila
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
 
-      const makeBodyRows = (rows: LotRow[]) =>
-        rows.map((r) => [
-          r.codigo ?? "",
-          r.zona ?? "",
-          fmt(r.tmh, 2),
-          fmt(r.humedad_pct, 2),
-          fmt(r.tms, 2),
-          fmt(r.au_gr_ton, 2),
-          fmt(r.au_fino, 2),
-          fmt(r.ag_gr_ton, 2),
-          fmt(r.ag_fino, 2),
-          fmt(r.cu_pct, 2),
-          fmt(r.nacn_kg_t, 2),
-          fmt(r.naoh_kg_t, 2),
-          fmt(r.rec_pct, 2),
-        ]);
-
-      const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
-
-      piles.forEach((p, idx) => {
-        if (idx > 0) doc.addPage();
-
-        drawHeader();
-
-        // subtítulo pila
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
-
-        const k = pileKPIs(p.lotes);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.text(
-          `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
-          marginX,
-          headerH + 38
-        );
-
-        autoTable(doc, {
-          head,
-          body: makeBodyRows(p.lotes),
-          startY: headerH + 48,
-          margin: { left: marginX, right: marginX },
-          styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-          headStyles: { fontStyle: "bold" },
-          theme: "grid",
-        });
-      });
-
-      // ✅ Footer solo en la última hoja
-      const lastY = (doc as any).lastAutoTable?.finalY ?? (headerH + 60);
-      const footerNeedH = 120;
-      const footerTopYMin = pageH - footerNeedH;
-
-      if (lastY > footerTopYMin) doc.addPage();
-
-      // dibujar footer firmas en la última página
-      const y0 = pageH - 95;
-      const x1 = marginX;
-      const x2 = pageW / 2 - 140;
-      const x3 = pageW - marginX - 280;
-
+      const k = pileKPIs(p.lotes);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
+      doc.text(
+        `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
+        marginX,
+        headerH + 38
+      );
 
-      const line = "-------------------------------";
+      autoTable(doc, {
+        head,
+        body: makeBodyRows(p.lotes),
+        startY: headerH + 48,
+        margin: { left: marginX, right: marginX },
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+        theme: "grid",
+        // ✅ encabezado azul #0067AC
+        headStyles: {
+          fillColor: [0, 103, 172],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+        },
+      });
+    });
 
-      const drawSig = (x: number, title1: string, title2: string, title3: string) => {
-        doc.text(line, x, y0);
-        doc.text("(tabulacion en blanco para que escriban nombre)", x, y0 + 14);
-        doc.text(title1, x, y0 + 30);
-        doc.text(title2, x, y0 + 44);
-        doc.text(title3, x, y0 + 58);
-      };
+    // ✅ Footer solo en la última hoja
+    const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+    const footerNeedH = 120;
+    const footerTopYMin = pageH - footerNeedH;
 
-      drawSig(x1, "Sub Gerencia de Planta", "Minera Veta Dorada S.A.C.", "");
-      drawSig(x2, "Supervisión de Cancha", "Minera Veta Dorada S.A.C.", "");
-      drawSig(x3, "Control de Minerales", "Minera Veta Dorada S.A.C.", "");
+    if (lastY > footerTopYMin) doc.addPage();
 
-      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
-      doc.save(fname);
-    } catch (e: any) {
-      alert(e?.message || "Error exportando");
-    } finally {
-      setExportLoading(false);
-    }
+    // ===== Footer firmas centradas en 3 columnas
+    const yLine = pageH - 95;
+    const colW = (pageW - marginX * 2) / 3;
+    const c1 = marginX + colW * 0.5;
+    const c2 = marginX + colW * 1.5;
+    const c3 = marginX + colW * 2.5;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+
+    const line = "-------------------------------";
+
+    const drawSigBlock = (cx: number, title1: string) => {
+      doc.text(line, cx, yLine, { align: "center" });
+
+      // ✅ deja espacio en blanco (NO imprime la frase tabulación)
+      // (solo saltamos 18 pt aprox)
+
+      doc.text(title1, cx, yLine + 32, { align: "center" });
+      doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
+    };
+
+    drawSigBlock(c1, "Sub Gerencia de Planta");
+    drawSigBlock(c2, "Supervisión de Cancha");
+    drawSigBlock(c3, "Control de Minerales");
+
+    const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
+    doc.save(fname);
+  } catch (e: any) {
+    alert(e?.message || "Error exportando");
+  } finally {
+    setExportLoading(false);
   }
+}
+
 
   if (!authorized) {
     return (

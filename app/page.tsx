@@ -246,7 +246,7 @@ type ViewKey = "1" | "2" | "3";
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
   lot_tmh_min: 0,
-  var_tmh_min: 440,
+  lot_rec_min: 0, // ✅ nuevo
   var_g_try: "20,24", // SOLO 1 PAR
   reag_min: 6,
   reag_max: 8,
@@ -275,7 +275,7 @@ function parseSinglePair(s: string): Array<[number, number]> | undefined {
 
 function buildSolverPayload(params: {
   lot_tmh_min: string;
-  var_tmh_min: string;
+  lot_rec_min: string; // ✅ nuevo
   var_g_tries: string;
   reag_min: string;
   reag_max: string;
@@ -283,7 +283,7 @@ function buildSolverPayload(params: {
   const payload: any = {};
 
   const lot_tmh_min = numOrUndef(params.lot_tmh_min);
-  const var_tmh_min = numOrUndef(params.var_tmh_min);
+  const lot_rec_min = numOrUndef(params.lot_rec_min); // ✅ nuevo
   const var_g_tries = parseSinglePair(params.var_g_tries);
 
   const reag_min = numOrUndef(params.reag_min);
@@ -291,8 +291,10 @@ function buildSolverPayload(params: {
 
   if (lot_tmh_min !== undefined) payload.lot_tmh_min = lot_tmh_min;
 
+  // ✅ nuevo: variable solver
+  if (lot_rec_min !== undefined) payload.lot_rec_min = lot_rec_min;
+
   payload.varios = {};
-  if (var_tmh_min !== undefined) payload.varios.var_tmh_min = var_tmh_min;
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
   if (Object.keys(payload.varios).length === 0) delete payload.varios;
 
@@ -410,7 +412,6 @@ function addImageContain(params: {
   doc.addImage(dataUrl, "PNG", x, y, w, h); // ratio intacto
 }
 
-
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -427,7 +428,7 @@ export default function Home() {
 
   // ===== Solo estos params =====
   const [lot_tmh_min, setLotTmhMin] = useState("");
-  const [var_tmh_min, setVarTmhMin] = useState("");
+  const [lot_rec_min, setLotRecMin] = useState(""); // ✅ nuevo
   const [var_g_tries, setVarGTries] = useState("");
   const [reag_min, setReagMin] = useState("");
   const [reag_max, setReagMax] = useState("");
@@ -502,7 +503,7 @@ export default function Home() {
     try {
       const payload = buildSolverPayload({
         lot_tmh_min,
-        var_tmh_min,
+        lot_rec_min, // ✅ nuevo
         var_g_tries,
         reag_min,
         reag_max,
@@ -568,151 +569,144 @@ export default function Home() {
 
   // ✅ EXPORT PDF (solo la vista seleccionada: 1,2 o 3)
   async function exportCurrentToPDF() {
-  setExportLoading(true);
-  try {
-    const piles = current;
-    if (!piles || piles.length === 0) {
-      alert("Sin datos para exportar.");
-      return;
-    }
-
-    const pileDate = getPileDateFromRows(flatCurrentRows);
-    const dateStr = formatDDMMYYYY(pileDate);
-
-    // logo: public/export_logo.png
-    const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
-    const logoSize = logoDataUrl ? await getImageNaturalSize(logoDataUrl).catch(() => ({ w: 0, h: 0 })) : { w: 0, h: 0 };
-
-    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-
-    const headerH = 60;
-    const marginX = 28;
-
-    const drawHeader = () => {
-      // Logo izquierda (SIN deformar)
-      if (logoDataUrl && logoSize.w > 0 && logoSize.h > 0) {
-        addImageContain({
-          doc,
-          dataUrl: logoDataUrl,
-          x: marginX,
-          y: 12,
-          maxW: 140,   // box max
-          maxH: 40,    // box max
-          naturalW: logoSize.w,
-          naturalH: logoSize.h,
-        });
+    setExportLoading(true);
+    try {
+      const piles = current;
+      if (!piles || piles.length === 0) {
+        alert("Sin datos para exportar.");
+        return;
       }
 
-      // Texto centro
-      const title = `Fecha de Pila: ${dateStr}`;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text(title, pageW / 2, 34, { align: "center" });
+      const pileDate = getPileDateFromRows(flatCurrentRows);
+      const dateStr = formatDDMMYYYY(pileDate);
 
-      // línea inferior header
-      doc.setDrawColor(180);
-      doc.setLineWidth(0.8);
-      doc.line(marginX, headerH, pageW - marginX, headerH);
-    };
+      // logo: public/export_logo.png
+      const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
+      const logoSize = logoDataUrl ? await getImageNaturalSize(logoDataUrl).catch(() => ({ w: 0, h: 0 })) : { w: 0, h: 0 };
 
-    const makeBodyRows = (rows: LotRow[]) =>
-      rows.map((r) => [
-        r.codigo ?? "",
-        r.zona ?? "",
-        fmt(r.tmh, 2),
-        fmt(r.humedad_pct, 2),
-        fmt(r.tms, 2),
-        fmt(r.au_gr_ton, 2),
-        fmt(r.au_fino, 2),
-        fmt(r.ag_gr_ton, 2),
-        fmt(r.ag_fino, 2),
-        fmt(r.cu_pct, 2),
-        fmt(r.nacn_kg_t, 2),
-        fmt(r.naoh_kg_t, 2),
-        fmt(r.rec_pct, 2),
-      ]);
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
 
-    const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
+      const headerH = 60;
+      const marginX = 28;
 
-    piles.forEach((p, idx) => {
-      if (idx > 0) doc.addPage();
+      const drawHeader = () => {
+        // Logo izquierda (SIN deformar)
+        if (logoDataUrl && logoSize.w > 0 && logoSize.h > 0) {
+          addImageContain({
+            doc,
+            dataUrl: logoDataUrl,
+            x: marginX,
+            y: 12,
+            maxW: 140,
+            maxH: 40,
+            naturalW: logoSize.w,
+            naturalH: logoSize.h,
+          });
+        }
 
-      drawHeader();
+        // Texto centro
+        const title = `Fecha de Pila: ${dateStr}`;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.text(title, pageW / 2, 34, { align: "center" });
 
-      // subtítulo pila
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
+        // línea inferior header
+        doc.setDrawColor(180);
+        doc.setLineWidth(0.8);
+        doc.line(marginX, headerH, pageW - marginX, headerH);
+      };
 
-      const k = pileKPIs(p.lotes);
+      const makeBodyRows = (rows: LotRow[]) =>
+        rows.map((r) => [
+          r.codigo ?? "",
+          r.zona ?? "",
+          fmt(r.tmh, 2),
+          fmt(r.humedad_pct, 2),
+          fmt(r.tms, 2),
+          fmt(r.au_gr_ton, 2),
+          fmt(r.au_fino, 2),
+          fmt(r.ag_gr_ton, 2),
+          fmt(r.ag_fino, 2),
+          fmt(r.cu_pct, 2),
+          fmt(r.nacn_kg_t, 2),
+          fmt(r.naoh_kg_t, 2),
+          fmt(r.rec_pct, 2),
+        ]);
+
+      const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
+
+      piles.forEach((p, idx) => {
+        if (idx > 0) doc.addPage();
+
+        drawHeader();
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
+
+        const k = pileKPIs(p.lotes);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(
+          `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
+          marginX,
+          headerH + 38
+        );
+
+        autoTable(doc, {
+          head,
+          body: makeBodyRows(p.lotes),
+          startY: headerH + 48,
+          margin: { left: marginX, right: marginX },
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+          theme: "grid",
+          headStyles: {
+            fillColor: [0, 103, 172], // #0067AC
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+          },
+        });
+      });
+
+      // ✅ Footer solo en la última hoja
+      const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+      const footerNeedH = 120;
+      const footerTopYMin = pageH - footerNeedH;
+
+      if (lastY > footerTopYMin) doc.addPage();
+
+      const yLine = pageH - 95;
+      const colW = (pageW - marginX * 2) / 3;
+      const c1 = marginX + colW * 0.5;
+      const c2 = marginX + colW * 1.5;
+      const c3 = marginX + colW * 2.5;
+
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.text(
-        `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
-        marginX,
-        headerH + 38
-      );
 
-      autoTable(doc, {
-        head,
-        body: makeBodyRows(p.lotes),
-        startY: headerH + 48,
-        margin: { left: marginX, right: marginX },
-        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-        theme: "grid",
-        // ✅ encabezado azul #0067AC
-        headStyles: {
-          fillColor: [0, 103, 172],
-          textColor: [255, 255, 255],
-          fontStyle: "bold",
-        },
-      });
-    });
+      const line = "-------------------------------";
 
-    // ✅ Footer solo en la última hoja
-    const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
-    const footerNeedH = 120;
-    const footerTopYMin = pageH - footerNeedH;
+      const drawSigBlock = (cx: number, title1: string) => {
+        doc.text(line, cx, yLine, { align: "center" });
+        // espacio en blanco para nombre (no imprimimos nada)
+        doc.text(title1, cx, yLine + 32, { align: "center" });
+        doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
+      };
 
-    if (lastY > footerTopYMin) doc.addPage();
+      drawSigBlock(c1, "Sub Gerencia de Planta");
+      drawSigBlock(c2, "Supervisión de Cancha");
+      drawSigBlock(c3, "Control de Minerales");
 
-    // ===== Footer firmas centradas en 3 columnas
-    const yLine = pageH - 95;
-    const colW = (pageW - marginX * 2) / 3;
-    const c1 = marginX + colW * 0.5;
-    const c2 = marginX + colW * 1.5;
-    const c3 = marginX + colW * 2.5;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    const line = "-------------------------------";
-
-    const drawSigBlock = (cx: number, title1: string) => {
-      doc.text(line, cx, yLine, { align: "center" });
-
-      // ✅ deja espacio en blanco (NO imprime la frase tabulación)
-      // (solo saltamos 18 pt aprox)
-
-      doc.text(title1, cx, yLine + 32, { align: "center" });
-      doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
-    };
-
-    drawSigBlock(c1, "Sub Gerencia de Planta");
-    drawSigBlock(c2, "Supervisión de Cancha");
-    drawSigBlock(c3, "Control de Minerales");
-
-    const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
-    doc.save(fname);
-  } catch (e: any) {
-    alert(e?.message || "Error exportando");
-  } finally {
-    setExportLoading(false);
+      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
+      doc.save(fname);
+    } catch (e: any) {
+      alert(e?.message || "Error exportando");
+    } finally {
+      setExportLoading(false);
+    }
   }
-}
-
 
   if (!authorized) {
     return (
@@ -791,7 +785,6 @@ export default function Home() {
             {loading ? "Cargando..." : "Actualizar"}
           </button>
 
-          {/* ✅ NUEVO: Exportar (según tab seleccionado) */}
           <button
             onClick={exportCurrentToPDF}
             disabled={exportLoading}
@@ -872,7 +865,15 @@ export default function Home() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
           <InputRow label="TMH mínimo de Lote" value={lot_tmh_min} onChange={setLotTmhMin} placeholder={`${DEFAULTS.lot_tmh_min}`} hint="0 = no filtra" />
 
-          <InputRow label="TMH mínimo de Pila" value={var_tmh_min} onChange={setVarTmhMin} placeholder={`${DEFAULTS.var_tmh_min}`} />
+          {/* ✅ reemplazo: Recuperación mínima de lote */}
+          <InputRow
+            label="Recuperación Mínima de Lote (%)"
+            value={lot_rec_min}
+            onChange={setLotRecMin}
+            placeholder={`${DEFAULTS.lot_rec_min}`}
+            hint="0 = no filtra"
+            width={260}
+          />
 
           <InputRow
             label="Ley Au Mínima y Máxima (g/t)"

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 # =========================
-# DEFAULTS (tu modelo actual)
+# DEFAULTS (misma lógica que tu script funcional)
 # =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
     # filtros / restricciones
@@ -32,7 +32,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "reag_min": 6.0,
     "reag_max": 8.0,
 
-    # knobs solver batch (si luego quieres exponerlos)
+    # knobs solver batch
     "batch_n_iters_hard": 900,
     "batch_n_iters_soft": 1400,
     "batch_max_steps": 600,
@@ -60,49 +60,84 @@ def _to_float(x: Any, default: float) -> float:
 
 def _to_int(x: Any, default: int) -> int:
     try:
-        v = int(x)
-        return v
+        return int(x)
     except:
         return default
 
 def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     """
-    Espera lista de pares: [[gmin,gmax], [gmin,gmax], ...]
-    Si viene vacío/ inválido => default
+    Acepta:
+    - [[gmin,gmax], [gmin,gmax], ...]
+    - (gmin,gmax)
+    - {"gmin":..,"gmax":..} (por si tu UI lo manda así)
+    Si viene inválido => default
     """
     if x is None:
         return default
+
+    # dict {"gmin":..,"gmax":..}
+    if isinstance(x, dict) and ("gmin" in x) and ("gmax" in x):
+        gmin = _to_float(x.get("gmin"), float("nan"))
+        gmax = _to_float(x.get("gmax"), float("nan"))
+        if math.isfinite(gmin) and math.isfinite(gmax):
+            if gmin > gmax:
+                gmin, gmax = gmax, gmin
+            return [(float(gmin), float(gmax))]
+        return default
+
+    # tuple/list (gmin,gmax)
+    if isinstance(x, (list, tuple)) and len(x) == 2 and not (
+        len(x) > 0 and isinstance(x[0], (list, tuple, dict))
+    ):
+        gmin = _to_float(x[0], float("nan"))
+        gmax = _to_float(x[1], float("nan"))
+        if math.isfinite(gmin) and math.isfinite(gmax):
+            if gmin > gmax:
+                gmin, gmax = gmax, gmin
+            return [(float(gmin), float(gmax))]
+        return default
+
+    # lista de pares
     if isinstance(x, list):
         out: List[Tuple[float, float]] = []
         for item in x:
-            if isinstance(item, (list, tuple)) and len(item) == 2:
-                a = _to_float(item[0], None)  # type: ignore
-                b = _to_float(item[1], None)  # type: ignore
-                if a is not None and b is not None and math.isfinite(a) and math.isfinite(b):
-                    gmin, gmax = float(a), float(b)
-                    if gmin > gmax:
-                        gmin, gmax = gmax, gmin
-                    out.append((gmin, gmax))
+            if isinstance(item, dict) and ("gmin" in item) and ("gmax" in item):
+                gmin = _to_float(item.get("gmin"), float("nan"))
+                gmax = _to_float(item.get("gmax"), float("nan"))
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                gmin = _to_float(item[0], float("nan"))
+                gmax = _to_float(item[1], float("nan"))
+            else:
+                continue
+
+            if math.isfinite(gmin) and math.isfinite(gmax):
+                if gmin > gmax:
+                    gmin, gmax = gmax, gmin
+                out.append((float(gmin), float(gmax)))
+
         return out if out else default
+
     return default
 
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     payload puede venir de UI (req.json()).
-    Si no viene o viene incompleto, usamos defaults.
+    Soporta:
+    - flat keys (legacy): lot_rec_min, var_tmh_max, ...
+    - nested: payload.filters / payload.varios / payload.batch / payload.reagents / payload.seeds / payload.knobs
 
-    Regla VAR_G_TRIES:
-    - si NO mandan nada => usamos los 3 defaults
-    - si mandan => usamos SOLO el primer par (1 intento)
+    IMPORTANTE (fix de tu resultado bajo):
+    - NO recorta var_g_tries a 1 intento. Si tu UI manda 1 par, queda 1.
+      Si manda varios, se usan varios (igual que tu script funcional con VAR_G_TRIES).
     """
     p = dict(DEFAULT_PARAMS)
 
     if not payload or not isinstance(payload, dict):
         return p
 
-    # -------------------------
-    # 1) floats top-level (legacy / compat)
-    # -------------------------
+    # ---------
+    # 1) flat floats (compat)
+    # ---------
     for k in [
         "lot_rec_min", "pile_rec_min", "lot_tmh_min",
         "var_tmh_max", "var_tmh_target", "var_tmh_min",
@@ -113,15 +148,25 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if k in payload:
             p[k] = _to_float(payload.get(k), p[k])
 
-    # -------------------------
-    # 2) floats nested (payload.varios / payload.batch / payload.reagents)
-    #    (por tu UI nueva)
-    # -------------------------
+    # ---------
+    # 2) nested: filters
+    # ---------
+    if isinstance(payload.get("filters"), dict):
+        f = payload["filters"]
+        for k in ["lot_rec_min", "pile_rec_min", "lot_tmh_min"]:
+            if k in f:
+                p[k] = _to_float(f.get(k), p[k])
+
+    # ---------
+    # 3) nested: varios / batch / reagents
+    # ---------
     if isinstance(payload.get("varios"), dict):
         v = payload["varios"]
         for k in ["var_tmh_max", "var_tmh_target", "var_tmh_min"]:
             if k in v:
                 p[k] = _to_float(v.get(k), p[k])
+        if "var_g_tries" in v:
+            p["var_g_tries"] = _parse_var_g_tries(v.get("var_g_tries"), p["var_g_tries"])
 
     if isinstance(payload.get("batch"), dict):
         b = payload["batch"]
@@ -135,33 +180,42 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if k in r:
                 p[k] = _to_float(r.get(k), p[k])
 
-    # -------------------------
-    # 3) VAR_G_TRIES (compat: top-level y nested payload["varios"])
-    #    Si viene algo, se usa SOLO un par (primer item)
-    # -------------------------
-    user_var_g = None
-    if isinstance(payload.get("varios"), dict) and ("var_g_tries" in payload["varios"]):
-        user_var_g = payload["varios"].get("var_g_tries")
-    elif "var_g_tries" in payload:
-        user_var_g = payload.get("var_g_tries")
+    # compat: var_g_tries top-level
+    if "var_g_tries" in payload:
+        p["var_g_tries"] = _parse_var_g_tries(payload.get("var_g_tries"), p["var_g_tries"])
 
-    if user_var_g is not None:
-        parsed = _parse_var_g_tries(user_var_g, p["var_g_tries"])
-        p["var_g_tries"] = parsed[:1] if parsed else p["var_g_tries"]
-
-    # -------------------------
-    # 4) ints (si algún día los expones)
-    # -------------------------
-    for k in [
+    # ---------
+    # 4) ints: knobs/seeds (flat + nested)
+    # ---------
+    int_keys = [
         "batch_n_iters_hard", "batch_n_iters_soft",
         "batch_max_steps", "batch_cand_sample",
         "batch_reseeds", "batch_pair_topk", "batch_pair_pool",
         "seed_batch_base", "seed_mix_batch",
-    ]:
+    ]
+    for k in int_keys:
         if k in payload:
             p[k] = _to_int(payload.get(k), p[k])
 
+    if isinstance(payload.get("knobs"), dict):
+        kx = payload["knobs"]
+        for k in [
+            "batch_n_iters_hard", "batch_n_iters_soft",
+            "batch_max_steps", "batch_cand_sample",
+            "batch_reseeds", "batch_pair_topk", "batch_pair_pool",
+        ]:
+            if k in kx:
+                p[k] = _to_int(kx.get(k), p[k])
+
+    if isinstance(payload.get("seeds"), dict):
+        sx = payload["seeds"]
+        for k in ["seed_batch_base", "seed_mix_batch"]:
+            if k in sx:
+                p[k] = _to_int(sx.get(k), p[k])
+
+    # ---------
     # saneos mínimos
+    # ---------
     if p["reag_min"] > p["reag_max"]:
         p["reag_min"], p["reag_max"] = p["reag_max"], p["reag_min"]
 
@@ -171,11 +225,19 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if p["bat_tmh_min"] > p["bat_tmh_max"]:
         p["bat_tmh_min"] = p["bat_tmh_max"]
 
+    # target dentro de [min,max] (evita sesgos raros por payload mal seteado)
+    p["var_tmh_target"] = max(float(p["var_tmh_min"]), min(float(p["var_tmh_target"]), float(p["var_tmh_max"])))
+    p["bat_tmh_target"] = max(float(p["bat_tmh_min"]), min(float(p["bat_tmh_target"]), float(p["bat_tmh_max"])))
+
+    # var_g_tries no vacío
+    if not isinstance(p.get("var_g_tries"), list) or len(p["var_g_tries"]) == 0:
+        p["var_g_tries"] = list(DEFAULT_PARAMS["var_g_tries"])
+
     return p
 
 
 # =========================
-# 1) PREP DATA (desde df raw)
+# 1) PREP DATA (misma lógica que tu código funcional)
 # =========================
 def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if df is None or df.empty:
@@ -199,7 +261,7 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
-    # limpieza mínima base
+    # limpieza mínima base (igual a tu script)
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
 
     # asegurar columnas
@@ -256,7 +318,7 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
 
 # =========================
-# 3) HELPERS
+# 3) HELPERS (misma ponderación por TMS)
 # =========================
 def wavg(values: pd.Series, weights: pd.Series) -> float:
     w = pd.to_numeric(weights, errors="coerce").fillna(0).astype(float)
@@ -306,7 +368,7 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
 
 
 # =========================
-# 4) VARIOS - TRIM
+# 4) VARIOS - TRIM (misma lógica que tu script funcional)
 # =========================
 def build_varios_trim(
     lots: pd.DataFrame,
@@ -485,9 +547,9 @@ def build_varios_trim(
         dens = au_fino[idx] / np.maximum(tmh[idx], 1e-9)
 
         ord_idx = np.lexsort((
-            -tmh2,
-            dens,
-            pen2
+            -tmh2,   # mayor TMH remanente
+            dens,    # menor densidad de finos (pierdes menos Au/tmh)
+            pen2     # menor penalty
         ))
         pick_pos = int(ord_idx[0])
         j = int(idx[pick_pos])
@@ -517,7 +579,7 @@ def build_varios_trim(
 
 
 # =========================
-# 5) BATCH
+# 5) BATCH (igual a tu solver funcional, parametrizado)
 # =========================
 def solve_one_pile(
     lots: pd.DataFrame,
@@ -881,6 +943,8 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     var_tmh_max = float(params["var_tmh_max"])
 
     var_g_tries: List[Tuple[float, float]] = list(params["var_g_tries"])
+
+    # intento 1: reagentes hard
     for (gmin, gmax) in var_g_tries:
         p = build_varios_trim(
             lots=lots,
@@ -899,6 +963,7 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
             if m["tmh"] >= var_tmh_min - 1e-9 and m["tmh"] <= var_tmh_max + 1e-9:
                 return p
 
+    # intento 2: reagentes soft (fallback)
     for (gmin, gmax) in var_g_tries:
         p = build_varios_trim(
             lots=lots,

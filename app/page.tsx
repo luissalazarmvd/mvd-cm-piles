@@ -8,6 +8,9 @@ import autoTable from "jspdf-autotable";
 
 const PASSWORD = process.env.NEXT_PUBLIC_WEB_PASS || "";
 
+const PBI_LOTES_URL =
+  "https://app.powerbi.com/view?r=eyJrIjoiODg3NGQ5YWEtY2VjZS00ZWFiLTk3MjUtZjI4MzMxZmJkZDQxIiwidCI6IjYzNzhiZmNkLWRjYjktNDMwZi05Nzc4LWRiNTk3NGRjMmFkYyIsImMiOjR9";
+
 type PileType = "batch" | "varios";
 
 type LotRow = {
@@ -820,6 +823,49 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {/* Universo de Lotes (Power BI) */}
+<section
+  style={{
+    background: "#004F86",
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,.12)",
+    marginBottom: 14,
+  }}
+>
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <h2 style={{ margin: 0, fontSize: 18 }}>Universo de Lotes (Control de Minerales)</h2>
+
+    <a
+      href={PBI_LOTES_URL}
+      target="_blank"
+      rel="noreferrer"
+      style={{ color: "#A7D8FF", fontWeight: 800, textDecoration: "underline" }}
+      title="Abrir en nueva pestaña"
+    >
+      Abrir en Power BI
+    </a>
+  </div>
+
+  <div style={{ height: 10 }} />
+
+  <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,.15)" }}>
+    <iframe
+      src={PBI_LOTES_URL}
+      title="Control de Minerales - Lotes Disponibles"
+      width="100%"
+      height={520}
+      style={{ border: 0, display: "block", background: "white" }}
+      allowFullScreen
+    />
+  </div>
+
+  <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+    Usa los filtros del reporte para validar el universo de lotes disponible.
+  </div>
+</section>
+
 
       {/* Panel de parámetros + botón Calcular */}
       <section

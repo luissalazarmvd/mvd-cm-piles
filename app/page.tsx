@@ -694,7 +694,7 @@ export default function Home() {
 
         const isLastPile = idx === piles.length - 1;
 
-autoTable(doc, {
+        autoTable(doc, {
   head,
   body: makeBodyRows(p.lotes),
 
@@ -738,7 +738,7 @@ autoTable(doc, {
     fontStyle: "bold",
   },
 });
-
+      });
 
       // ✅ Footer solo en la última hoja
       const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;

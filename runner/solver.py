@@ -8,12 +8,18 @@ import pandas as pd
 # =========================
 # DEFAULTS (misma lógica que tu script funcional)
 # AHORA: tamaño/targets por TMS (no TMH)
+# + Filtro de ZONAS (por defecto: todas)
 # =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
     # filtros / restricciones
     "lot_rec_min": 85.0,      # filtro duro por lote
     "pile_rec_min": 85.0,     # rec ponderada de pila >= 85
     "lot_tms_min": 0.0,       # TMS mínima por lote (0 = no filtra)
+
+    # zonas:
+    # - None => no filtra (equivale a "todas las zonas")
+    # - lista no vacía => filtra solo esas zonas
+    "zones": None,
 
     # VARIOS (TMS)
     "var_tms_max": 550.0,
@@ -125,6 +131,53 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
 
     return default
 
+def _normalize_zone_str(x: Any) -> str:
+    try:
+        s = str(x).strip()
+        return s
+    except:
+        return ""
+
+def _parse_str_list(x: Any) -> Optional[List[str]]:
+    """
+    Acepta:
+    - None => None
+    - ["Z1","Z2"] => lista normalizada
+    - "Z1,Z2" => lista normalizada
+    - "" o [] => None (equivale a "todas")
+    """
+    if x is None:
+        return None
+
+    # si viene dict raro, ignora
+    if isinstance(x, dict):
+        return None
+
+    out: List[str] = []
+
+    if isinstance(x, (list, tuple, set)):
+        for it in x:
+            s = _normalize_zone_str(it)
+            if s:
+                out.append(s)
+    else:
+        s = _normalize_zone_str(x)
+        if s:
+            # split por coma si aplica
+            parts = [p.strip() for p in s.split(",")]
+            out.extend([p for p in parts if p])
+
+    # unique preservando orden
+    seen = set()
+    uniq: List[str] = []
+    for s in out:
+        key = s.casefold()
+        if key not in seen:
+            seen.add(key)
+            uniq.append(s)
+
+    return uniq if len(uniq) > 0 else None
+
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     payload puede venir de UI (req.json()).
@@ -136,6 +189,7 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     Cambios:
     - Targets/capacidad por TMS: var_tms_* y bat_tms_*.
     - Filtro min por lote: lot_tms_min.
+    - + Filtro por zonas: zones (por defecto None => todas)
     - Mantiene compat con llaves antiguas tmh_* (si llegan, se mapean a tms_*).
     """
     p = dict(DEFAULT_PARAMS)
@@ -172,6 +226,12 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if k in payload:
             p[k] = _to_float(payload.get(k), p[k])
 
+    # flat: zones / zonas (compat)
+    if "zones" in payload:
+        p["zones"] = _parse_str_list(payload.get("zones"))
+    elif "zonas" in payload:
+        p["zones"] = _parse_str_list(payload.get("zonas"))
+
     # ---------
     # 2) nested: filters
     # ---------
@@ -185,6 +245,15 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         for k in ["lot_rec_min", "pile_rec_min", "lot_tms_min"]:
             if k in f:
                 p[k] = _to_float(f.get(k), p[k])
+
+        # zones in filters: zones / zonas / zona
+        if "zones" in f:
+            p["zones"] = _parse_str_list(f.get("zones"))
+        elif "zonas" in f:
+            p["zones"] = _parse_str_list(f.get("zonas"))
+        elif "zona" in f:
+            # permite pasar una sola zona como string
+            p["zones"] = _parse_str_list(f.get("zona"))
 
     # ---------
     # 3) nested: varios / batch / reagents
@@ -278,6 +347,9 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if float(p.get("bat_lot_g_min", 0.0) or 0.0) < 0:
         p["bat_lot_g_min"] = 0.0
 
+    # zones: si viene [] o "" => None (todas)
+    p["zones"] = _parse_str_list(p.get("zones"))
+
     return p
 
 
@@ -310,9 +382,26 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
 
     # asegurar columnas
+    if "zona" not in d.columns:
+        d["zona"] = np.nan
     if "tms" not in d.columns: d["tms"] = np.nan
     if "tmh" not in d.columns: d["tmh"] = np.nan
     if "humedad_pct" not in d.columns: d["humedad_pct"] = np.nan
+
+    # ---------
+    # filtro por ZONAS (si viene lista desde UI)
+    # - default: None => no filtra (todas)
+    # ---------
+    zones = params.get("zones", None)
+    zones_list = _parse_str_list(zones)
+    if zones_list is not None and len(zones_list) > 0:
+        # normaliza para match case-insensitive
+        zset = set([str(z).strip().casefold() for z in zones_list if str(z).strip() != ""])
+        d["_zona_norm"] = d["zona"].astype(str).str.strip().str.casefold()
+        d = d[d["_zona_norm"].isin(zset)].copy()
+        d = d.drop(columns=["_zona_norm"], errors="ignore")
+        if d.empty:
+            return pd.DataFrame()
 
     d["tmh"] = pd.to_numeric(d["tmh"], errors="coerce")
     d["tms"] = pd.to_numeric(d["tms"], errors="coerce")
@@ -1052,6 +1141,8 @@ def solve(df_raw: pd.DataFrame, payload: Optional[Dict[str, Any]] = None) -> tup
     """
     Input: df con columnas de stg_lotes_daily.
     payload: overrides desde UI (opcional).
+      - Para zonas: payload["zones"] o payload["filters"]["zones"] (o "zonas").
+        Si no viene, se asume "todas" (no filtra).
     Output: p1, p2, p3 listos para insertar.
     """
     params = resolve_params(payload)

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // ✅ PDF export
 import { jsPDF } from "jspdf";
@@ -227,7 +227,6 @@ function DataTable({ rows }: { rows: LotRow[] }) {
         {rows.length > 0 && (
           <tfoot>
             <tr>
-              {/* ✅ subtotal/total solo en la última fila de cada tabla */}
               <td style={tfootTd} />
               <td style={tfootTd}>SUBTOTAL</td>
               <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
@@ -287,6 +286,9 @@ function parseSinglePair(s: string): Array<[number, number]> | undefined {
 }
 
 function buildSolverPayload(params: {
+  zonesSelected: string[];
+  zonesAll: string[];
+
   lot_tms_min: string;
   lot_rec_min: string;
   var_g_tries: string;
@@ -304,6 +306,15 @@ function buildSolverPayload(params: {
 
   // ✅ nuevos params: dentro de filters
   payload.filters = {};
+
+  // ✅ zones: por defecto todas seleccionadas => NO enviar nada
+  // si el usuario deselecciona algo => enviamos solo las seleccionadas
+  const all = params.zonesAll ?? [];
+  const sel = params.zonesSelected ?? [];
+  const isAllSelected = all.length > 0 && sel.length === all.length;
+
+  if (!isAllSelected && sel.length > 0) payload.filters.zones = sel;
+
   if (lot_tms_min !== undefined) payload.filters.lot_tms_min = lot_tms_min;
   if (lot_rec_min !== undefined) payload.filters.lot_rec_min = lot_rec_min;
   if (Object.keys(payload.filters).length === 0) delete payload.filters;
@@ -353,6 +364,134 @@ function InputRow({
         }}
       />
       {hint && <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>{hint}</span>}
+    </div>
+  );
+}
+
+// ====== selector zonas (dropdown con checkboxes) ======
+function ZoneDropdown({
+  zones,
+  selected,
+  onToggle,
+  onSelectAll,
+}: {
+  zones: string[];
+  selected: string[];
+  onToggle: (z: string) => void;
+  onSelectAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!open) return;
+      if (!boxRef.current) return;
+      if (!boxRef.current.contains(e.target as any)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const allSelected = zones.length > 0 && selected.length === zones.length;
+
+  const label =
+    zones.length === 0
+      ? "Cargando..."
+      : allSelected
+      ? `Todas (${zones.length})`
+      : `${selected.length} seleccionadas`;
+
+  return (
+    <div ref={boxRef} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
+      <b style={{ fontSize: 13 }}>Zonas</b>
+
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        style={{
+          padding: "10px 10px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,.25)",
+          background: "rgba(0,0,0,.12)",
+          color: "white",
+          fontSize: 13,
+          textAlign: "left",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+        title="Deselecciona una zona para filtrar"
+      >
+        <span>{label}</span>
+        <span style={{ opacity: 0.9 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.25)",
+            background: "rgba(0,0,0,.20)",
+            padding: 10,
+            maxHeight: 240,
+            overflow: "auto",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <b style={{ fontSize: 12 }}>Seleccionar</b>
+            <button
+              type="button"
+              onClick={onSelectAll}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,.25)",
+                background: "rgba(255,255,255,.10)",
+                color: "white",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              Todas
+            </button>
+          </div>
+
+          {zones.map((z) => {
+            const checked = selected.includes(z);
+            return (
+              <label
+                key={z}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 6px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggle(z)}
+                  style={{ width: 16, height: 16 }}
+                />
+                <span style={{ fontSize: 13 }}>{z}</span>
+              </label>
+            );
+          })}
+
+          {zones.length === 0 && <div style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Sin zonas.</div>}
+        </div>
+      )}
+
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+        Default: todas seleccionadas. Si quitas una, filtra.
+      </span>
     </div>
   );
 }
@@ -472,6 +611,11 @@ export default function Home() {
 
   const [view, setView] = useState<ViewKey>("1");
 
+  // ===== ZONAS =====
+  const [zonesAll, setZonesAll] = useState<string[]>([]);
+  const [zonesSelected, setZonesSelected] = useState<string[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(false);
+
   // ===== Solo estos params =====
   const [lot_tms_min, setLotTmsMin] = useState("");
   const [lot_rec_min, setLotRecMin] = useState("");
@@ -512,6 +656,34 @@ export default function Home() {
     setError("");
   };
 
+  async function loadZones() {
+    setZonesLoading(true);
+    try {
+      const res = await fetch("/api/zones", { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Error cargando zonas");
+
+      const z: string[] = Array.isArray(j?.zones) ? j.zones : [];
+      setZonesAll(z);
+
+      // ✅ default: todas seleccionadas
+      setZonesSelected((prev) => {
+        // si ya había selección, respétala SOLO si sigue existiendo
+        if (prev && prev.length > 0) {
+          const setZ = new Set(z);
+          const filtered = prev.filter((x) => setZ.has(x));
+          return filtered.length > 0 ? filtered : z;
+        }
+        return z;
+      });
+    } catch {
+      setZonesAll([]);
+      setZonesSelected([]);
+    } finally {
+      setZonesLoading(false);
+    }
+  }
+
   async function loadAll() {
     setLoading(true);
     setLoadError("");
@@ -548,6 +720,9 @@ export default function Home() {
     setCalcMsg("");
     try {
       const payload = buildSolverPayload({
+        zonesSelected,
+        zonesAll,
+
         lot_tms_min,
         lot_rec_min,
         var_g_tries,
@@ -578,9 +753,26 @@ export default function Home() {
 
   useEffect(() => {
     if (!authorized) return;
+    loadZones();
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authorized]);
+
+  // ✅ toggle zonas (evita quedarse en 0 seleccionadas)
+  function toggleZone(z: string) {
+    setZonesSelected((prev) => {
+      const has = prev.includes(z);
+      if (has) {
+        if (prev.length <= 1) return prev; // no dejes 0
+        return prev.filter((x) => x !== z);
+      }
+      return [...prev, z];
+    });
+  }
+
+  function selectAllZones() {
+    setZonesSelected(zonesAll);
+  }
 
   const g1 = useMemo(() => groupByPile(r1), [r1]);
   const g2 = useMemo(() => groupByPile(r2), [r2]);
@@ -698,7 +890,6 @@ export default function Home() {
         const k = pileKPIs(p.lotes);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
-        // ✅ arriba en PDF: TMS en lugar de TMH
         doc.text(
           `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`,
           marginX,
@@ -711,7 +902,6 @@ export default function Home() {
           head,
           body: makeBodyRows(p.lotes),
 
-          // ✅ subtotal para CADA tabla (cada pila)
           foot: [
             [
               "",
@@ -731,13 +921,11 @@ export default function Home() {
             ],
           ],
 
-          // ✅ y que salga SOLO en la última hoja del table (si se parte en 2+ páginas)
           showFoot: "lastPage",
 
           startY: headerH + 48,
           margin: { left: marginX, right: marginX },
 
-          // ✅ bordes + grid
           theme: "grid",
           styles: {
             font: "helvetica",
@@ -748,14 +936,13 @@ export default function Home() {
           },
 
           headStyles: {
-            fillColor: [0, 103, 172], // #0067AC
+            fillColor: [0, 103, 172],
             textColor: [255, 255, 255],
             fontStyle: "bold",
             lineWidth: 0.6,
             lineColor: [180, 180, 180],
           },
 
-          // ✅ subtotal blanco + letras #0067AC en negrita
           footStyles: {
             fillColor: [255, 255, 255],
             textColor: [0, 103, 172],
@@ -1011,6 +1198,14 @@ export default function Home() {
         <div style={{ height: 10 }} />
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+          {/* ✅ PRIMERO: selector de ZONAS */}
+          <ZoneDropdown
+            zones={zonesAll}
+            selected={zonesSelected}
+            onToggle={toggleZone}
+            onSelectAll={selectAllZones}
+          />
+
           <InputRow
             label="TMS mínimo de Lote"
             value={lot_tms_min}
@@ -1040,6 +1235,8 @@ export default function Home() {
           <InputRow label="Consumo Mínimo de Reactivo (kg/t)" value={reag_min} onChange={setReagMin} placeholder={`${DEFAULTS.reag_min}`} />
           <InputRow label="Consumo Máximo de Reactivo (kg/t)" value={reag_max} onChange={setReagMax} placeholder={`${DEFAULTS.reag_max}`} />
         </div>
+
+        {zonesLoading && <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>Cargando zonas...</div>}
       </section>
 
       {/* Tabs */}
@@ -1072,7 +1269,6 @@ export default function Home() {
                   Pila #{pile_code} ({pile_type})
                 </b>
 
-                {/* ✅ arriba de la tabla: TMS en lugar de TMH */}
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
                   TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
                 </span>

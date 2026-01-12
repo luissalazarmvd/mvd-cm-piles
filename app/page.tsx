@@ -47,9 +47,14 @@ function n(x: any): number {
   return Number.isFinite(v) ? v : 0;
 }
 
+// ✅ separador miles con coma (12,686.51)
 function fmt(x: any, d = 2) {
   const v = n(x);
-  return v === 0 && (x === null || x === undefined || x === "") ? "" : v.toFixed(d);
+  if (v === 0 && (x === null || x === undefined || x === "")) return "";
+  return v.toLocaleString("en-US", {
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
+  });
 }
 
 function groupByPile(rows: LotRow[]) {
@@ -79,13 +84,14 @@ function w(r: LotRow) {
 
 function pileKPIs(rows: LotRow[]) {
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
 
   const auWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.au_gr_ton), 0) / wSum : 0;
   const humWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
   const recWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0;
 
-  return { tmhSum, auWeighted, humWeighted, recWeighted };
+  return { tmhSum, tmsSum, auWeighted, humWeighted, recWeighted };
 }
 
 const COLS = [
@@ -219,20 +225,20 @@ function DataTable({ rows }: { rows: LotRow[] }) {
               <td style={tfootTd}>TOTAL</td>
               <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
 
-              <td style={tfootTd}>{tmhSum.toFixed(2)}</td>
-              <td style={tfootTd}>{humW.toFixed(2)}</td>
-              <td style={tfootTd}>{tmsSum.toFixed(2)}</td>
+              <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
+              <td style={tfootTd}>{fmt(humW, 2)}</td>
+              <td style={tfootTd}>{fmt(tmsSum, 2)}</td>
 
-              <td style={tfootTd}>{auW.toFixed(2)}</td>
-              <td style={tfootTd}>{auFinoSum.toFixed(2)}</td>
+              <td style={tfootTd}>{fmt(auW, 2)}</td>
+              <td style={tfootTd}>{fmt(auFinoSum, 2)}</td>
 
-              <td style={tfootTd}>{agW.toFixed(2)}</td>
-              <td style={tfootTd}>{agFinoSum.toFixed(2)}</td>
+              <td style={tfootTd}>{fmt(agW, 2)}</td>
+              <td style={tfootTd}>{fmt(agFinoSum, 2)}</td>
 
-              <td style={tfootTd}>{cuW.toFixed(2)}</td>
-              <td style={tfootTd}>{nacnW.toFixed(2)}</td>
-              <td style={tfootTd}>{naohW.toFixed(2)}</td>
-              <td style={tfootTd}>{recW.toFixed(2)}</td>
+              <td style={tfootTd}>{fmt(cuW, 2)}</td>
+              <td style={tfootTd}>{fmt(nacnW, 2)}</td>
+              <td style={tfootTd}>{fmt(naohW, 2)}</td>
+              <td style={tfootTd}>{fmt(recW, 2)}</td>
             </tr>
           </tfoot>
         )}
@@ -289,11 +295,11 @@ function buildSolverPayload(params: {
   const reag_min = numOrUndef(params.reag_min);
   const reag_max = numOrUndef(params.reag_max);
 
+  // ✅ nuevos params: dentro de filters
   payload.filters = {};
-if (lot_tms_min !== undefined) payload.filters.lot_tms_min = lot_tms_min;
-if (lot_rec_min !== undefined) payload.filters.lot_rec_min = lot_rec_min;
-if (Object.keys(payload.filters).length === 0) delete payload.filters;
-
+  if (lot_tms_min !== undefined) payload.filters.lot_tms_min = lot_tms_min;
+  if (lot_rec_min !== undefined) payload.filters.lot_rec_min = lot_rec_min;
+  if (Object.keys(payload.filters).length === 0) delete payload.filters;
 
   payload.varios = {};
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
@@ -684,63 +690,77 @@ export default function Home() {
         const k = pileKPIs(p.lotes);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
+        // ✅ arriba en PDF también: TMS en lugar de TMH
         doc.text(
-          `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
+          `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`,
           marginX,
           headerH + 38
         );
 
         const tot = totalsForExport(p.lotes);
-
         const isLastPile = idx === piles.length - 1;
 
         autoTable(doc, {
-  head,
-  body: makeBodyRows(p.lotes),
+          head,
+          body: makeBodyRows(p.lotes),
 
-  // ✅ subtotal solo en la última pila exportada
-  foot: isLastPile
-    ? [[
-        "SUBTOTAL",
-        `(${p.lotes.length} lotes)`,
-        tot.tmhSum.toFixed(2),
-        tot.humW.toFixed(2),
-        tot.tmsSum.toFixed(2),
-        tot.auW.toFixed(2),
-        tot.auFinoSum.toFixed(2),
-        tot.agW.toFixed(2),
-        tot.agFinoSum.toFixed(2),
-        tot.cuW.toFixed(2),
-        tot.nacnW.toFixed(2),
-        tot.naohW.toFixed(2),
-        tot.recW.toFixed(2),
-      ]]
-    : undefined,
+          // ✅ subtotal solo en la última pila exportada
+          foot: isLastPile
+            ? [
+                [
+                  "SUBTOTAL",
+                  `(${p.lotes.length} lotes)`,
+                  fmt(tot.tmhSum, 2),
+                  fmt(tot.humW, 2),
+                  fmt(tot.tmsSum, 2),
+                  fmt(tot.auW, 2),
+                  fmt(tot.auFinoSum, 2),
+                  fmt(tot.agW, 2),
+                  fmt(tot.agFinoSum, 2),
+                  fmt(tot.cuW, 2),
+                  fmt(tot.nacnW, 2),
+                  fmt(tot.naohW, 2),
+                  fmt(tot.recW, 2),
+                ],
+              ]
+            : undefined,
 
-  // ✅ y que salga SOLO en la última hoja del table (si se parte en 2+ páginas)
-  showFoot: isLastPile ? "lastPage" : "never",
+          // ✅ y que salga SOLO en la última hoja del table (si se parte en 2+ páginas)
+          showFoot: isLastPile ? "lastPage" : "never",
 
-  startY: headerH + 48,
-  margin: { left: marginX, right: marginX },
-  styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-  theme: "grid",
+          startY: headerH + 48,
+          margin: { left: marginX, right: marginX },
 
-  headStyles: {
-    fillColor: [0, 103, 172], // #0067AC
-    textColor: [255, 255, 255],
-    fontStyle: "bold",
-  },
+          // ✅ bordes + grid
+          theme: "grid",
+          styles: {
+            font: "helvetica",
+            fontSize: 8,
+            cellPadding: 3,
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
 
-  // ✅ subtotal blanco + letras #0067AC en negrita
-  footStyles: {
-    fillColor: [255, 255, 255],
-    textColor: [0, 103, 172],
-    fontStyle: "bold",
-  },
-});
+          headStyles: {
+            fillColor: [0, 103, 172], // #0067AC
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
+
+          // ✅ subtotal blanco + letras #0067AC en negrita
+          footStyles: {
+            fillColor: [255, 255, 255],
+            textColor: [0, 103, 172],
+            fontStyle: "bold",
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
+        });
       });
 
-      // ✅ Footer solo en la última hoja
+      // ✅ Footer firmas solo en la última hoja
       const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
       const footerNeedH = 120;
       const footerTopYMin = pageH - footerNeedH;
@@ -1010,7 +1030,6 @@ export default function Home() {
           />
 
           <InputRow label="Consumo Mínimo de Reactivo (kg/t)" value={reag_min} onChange={setReagMin} placeholder={`${DEFAULTS.reag_min}`} />
-
           <InputRow label="Consumo Máximo de Reactivo (kg/t)" value={reag_max} onChange={setReagMax} placeholder={`${DEFAULTS.reag_max}`} />
         </div>
       </section>
@@ -1044,10 +1063,13 @@ export default function Home() {
                 <b>
                   Pila #{pile_code} ({pile_type})
                 </b>
+
+                {/* ✅ arriba de la tabla: TMS en lugar de TMH */}
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
+                  TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
                 </span>
               </div>
+
               <DataTable rows={lotes} />
             </div>
           );

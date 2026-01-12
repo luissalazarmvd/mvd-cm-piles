@@ -32,7 +32,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "bat_lot_g_min": 0.0,
 
     "bat_pile_g_min": 30.0,
-    "bat_pile_g_max": 120.0,
+    "bat_pile_g_max": 1e9,
 
     # REAGENTES (ponderados por TMS en pila)
     "reag_min": 4.0,
@@ -946,7 +946,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         tms_target=float(params["bat_tms_target"]),
         tms_min=float(params["bat_tms_min"]),
         gmin=float(params["bat_pile_g_min"]),
-        gmax=float(params["bat_pile_g_max"]),
+        gmax=1e9,
         gmin_exclusive=False,
         gmax_inclusive=True,
         rec_min=pile_rec_min,
@@ -972,7 +972,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         tms_target=float(params["bat_tms_target"]),
         tms_min=float(params["bat_tms_min"]),
         gmin=float(params["bat_pile_g_min"]),
-        gmax=float(params["bat_pile_g_max"]),
+        gmax=1e9,
         gmin_exclusive=False,
         gmax_inclusive=True,
         rec_min=pile_rec_min,

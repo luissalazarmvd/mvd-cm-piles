@@ -790,6 +790,8 @@ def solve_one_pile(
             else:
                 reag_pen = 18.0 * (cn_dist + oh_dist)
 
+            LAW_BONUS = 8.0
+
             score = (
                 18.0 * fill
                 - 250.0 * g_pen
@@ -797,6 +799,7 @@ def solve_one_pile(
                 - 25.0  * lowrec_pen
                 - reag_pen
                 + 0.15 * add_tms
+                + LAW_BONUS * new_g
             )
 
             bad = bad_reag[cand_np]
@@ -864,6 +867,7 @@ def solve_one_pile(
                                     - 25.0  * lowrec2
                                     - reag_pen2
                                     + 0.15 * add_tms2
+                                    + LAW_BONUS * new_g2
                                 )
 
                         if sc > best_score:
@@ -900,7 +904,7 @@ def solve_one_pile(
 
         under = max(0.0, tms_min - m["tms"])
         gap = abs(m["tms"] - tms_target)
-        key = (under, gap, -m["tms"], -m["rec_pct"])
+        key = (under, gap, -m["au_gr_ton"], -m["tms"], -m["rec_pct"])
         if best_key is None or key < best_key:
             best_key = key
             best_sol = sol

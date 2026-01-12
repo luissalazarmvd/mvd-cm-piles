@@ -12,7 +12,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     # filtros / restricciones
     "lot_rec_min": 85.0,      # filtro duro por lote
     "pile_rec_min": 85.0,     # rec ponderada de pila >= 85
-    "lot_tmh_min": 0.0,       # NUEVO: tmh_eff mínima por lote (0 = no filtra)
+    "lot_tmh_min": 0.0,       # tmh_eff mínima por lote (0 = no filtra)
 
     # VARIOS
     "var_tmh_max": 550.0,
@@ -66,6 +66,10 @@ def _to_int(x: Any, default: int) -> int:
         return default
 
 def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """
+    Espera lista de pares: [[gmin,gmax], [gmin,gmax], ...]
+    Si viene vacío/ inválido => default
+    """
     if x is None:
         return default
     if isinstance(x, list):
@@ -75,7 +79,10 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
                 a = _to_float(item[0], None)  # type: ignore
                 b = _to_float(item[1], None)  # type: ignore
                 if a is not None and b is not None and math.isfinite(a) and math.isfinite(b):
-                    out.append((float(a), float(b)))
+                    gmin, gmax = float(a), float(b)
+                    if gmin > gmax:
+                        gmin, gmax = gmax, gmin
+                    out.append((gmin, gmax))
         return out if out else default
     return default
 
@@ -83,13 +90,19 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     payload puede venir de UI (req.json()).
     Si no viene o viene incompleto, usamos defaults.
+
+    Regla VAR_G_TRIES:
+    - si NO mandan nada => usamos los 3 defaults
+    - si mandan => usamos SOLO el primer par (1 intento)
     """
     p = dict(DEFAULT_PARAMS)
 
     if not payload or not isinstance(payload, dict):
         return p
 
-    # floats
+    # -------------------------
+    # 1) floats top-level (legacy / compat)
+    # -------------------------
     for k in [
         "lot_rec_min", "pile_rec_min", "lot_tmh_min",
         "var_tmh_max", "var_tmh_target", "var_tmh_min",
@@ -100,11 +113,45 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if k in payload:
             p[k] = _to_float(payload.get(k), p[k])
 
-    # var_g_tries
-    if "var_g_tries" in payload:
-        p["var_g_tries"] = _parse_var_g_tries(payload.get("var_g_tries"), p["var_g_tries"])
+    # -------------------------
+    # 2) floats nested (payload.varios / payload.batch / payload.reagents)
+    #    (por tu UI nueva)
+    # -------------------------
+    if isinstance(payload.get("varios"), dict):
+        v = payload["varios"]
+        for k in ["var_tmh_max", "var_tmh_target", "var_tmh_min"]:
+            if k in v:
+                p[k] = _to_float(v.get(k), p[k])
 
-    # ints
+    if isinstance(payload.get("batch"), dict):
+        b = payload["batch"]
+        for k in ["bat_tmh_max", "bat_tmh_target", "bat_tmh_min", "bat_lot_g_min", "bat_pile_g_min", "bat_pile_g_max"]:
+            if k in b:
+                p[k] = _to_float(b.get(k), p[k])
+
+    if isinstance(payload.get("reagents"), dict):
+        r = payload["reagents"]
+        for k in ["reag_min", "reag_max"]:
+            if k in r:
+                p[k] = _to_float(r.get(k), p[k])
+
+    # -------------------------
+    # 3) VAR_G_TRIES (compat: top-level y nested payload["varios"])
+    #    Si viene algo, se usa SOLO un par (primer item)
+    # -------------------------
+    user_var_g = None
+    if isinstance(payload.get("varios"), dict) and ("var_g_tries" in payload["varios"]):
+        user_var_g = payload["varios"].get("var_g_tries")
+    elif "var_g_tries" in payload:
+        user_var_g = payload.get("var_g_tries")
+
+    if user_var_g is not None:
+        parsed = _parse_var_g_tries(user_var_g, p["var_g_tries"])
+        p["var_g_tries"] = parsed[:1] if parsed else p["var_g_tries"]
+
+    # -------------------------
+    # 4) ints (si algún día los expones)
+    # -------------------------
     for k in [
         "batch_n_iters_hard", "batch_n_iters_soft",
         "batch_max_steps", "batch_cand_sample",
@@ -119,7 +166,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         p["reag_min"], p["reag_max"] = p["reag_max"], p["reag_min"]
 
     if p["var_tmh_min"] > p["var_tmh_max"]:
-        # si te mandan mal, prioriza max y ajusta min
         p["var_tmh_min"] = p["var_tmh_max"]
 
     if p["bat_tmh_min"] > p["bat_tmh_max"]:
@@ -178,7 +224,7 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d = d.dropna(subset=["tmh_eff", "tms"]).copy()
     d = d[(d["tmh_eff"] > 0) & (d["tms"] > 0)].copy()
 
-    # NUEVO: filtro duro por TMH mínima por lote (tmh_eff)
+    # filtro duro por TMH mínima por lote (tmh_eff)
     lot_tmh_min = float(params.get("lot_tmh_min", 0.0) or 0.0)
     if lot_tmh_min > 0:
         d = d[d["tmh_eff"] >= lot_tmh_min].copy()

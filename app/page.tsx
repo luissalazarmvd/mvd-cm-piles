@@ -59,7 +59,7 @@ function groupByPile(rows: LotRow[]) {
       const [pile_code_s, pile_type] = k.split("__");
       return { pile_code: Number(pile_code_s), pile_type: pile_type as PileType, lotes };
     })
-    .sort((a, b) => (a.pile_code - b.pile_code) || a.pile_type.localeCompare(b.pile_type));
+    .sort((a, b) => a.pile_code - b.pile_code || a.pile_type.localeCompare(b.pile_type));
 }
 
 // peso para ponderados: prioriza TMS; si no hay, usa TMH
@@ -239,28 +239,15 @@ function DataTable({ rows }: { rows: LotRow[] }) {
 
 type ViewKey = "1" | "2" | "3";
 
-/** Defaults (solo para placeholder/hint en UI) */
+/** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
-  pile_rec_min: 85,
-  lot_tmh_min: 0, // NUEVO: mínimo TMH por lote (si 0 = no filtra)
-  varios: {
-    var_tmh_max: 550,
-    var_tmh_target: 550,
-    var_tmh_min: 440,
-    var_g_tries: "20,24; 19.5,24; 19,24",
-  },
-  batch: {
-    bat_tmh_max: 120,
-    bat_tmh_target: 120,
-    bat_tmh_min: 80,
-    bat_lot_g_min: 70,
-    bat_pile_g_min: 70,
-    bat_pile_g_max: 1e9,
-  },
-  reag: {
-    reag_min: 6,
-    reag_max: 8,
-  },
+  lot_tmh_min: 0,
+  var_tmh_min: 440,
+  var_g_try: "20,24", // SOLO 1 PAR
+  bat_tmh_target: 120,
+  bat_lot_g_min: 70,
+  reag_min: 6,
+  reag_max: 8,
 };
 
 function numOrUndef(x: string): number | undefined {
@@ -270,83 +257,56 @@ function numOrUndef(x: string): number | undefined {
   return Number.isFinite(v) ? v : undefined;
 }
 
-function parseVarGTries(s: string): Array<[number, number]> | undefined {
+function parseSinglePair(s: string): Array<[number, number]> | undefined {
   const raw = (s ?? "").trim();
   if (!raw) return undefined;
+  const first = raw.split(";")[0]?.trim();
+  if (!first) return undefined;
 
-  // formato: "20,24; 19.5,24; 19,24"
-  const parts = raw.split(";").map(p => p.trim()).filter(Boolean);
-  if (parts.length === 0) return undefined;
+  const [a, b] = first.split(",").map((x) => x.trim());
+  const gmin = Number(a);
+  const gmax = Number(b);
+  if (!Number.isFinite(gmin) || !Number.isFinite(gmax)) return undefined;
 
-  const out: Array<[number, number]> = [];
-  for (const p of parts) {
-    const [a, b] = p.split(",").map(x => x.trim());
-    const gmin = Number(a);
-    const gmax = Number(b);
-    if (!Number.isFinite(gmin) || !Number.isFinite(gmax)) continue;
-    out.push([gmin, gmax]);
-  }
-  return out.length ? out : undefined;
+  return [[gmin, gmax]];
 }
 
 function buildSolverPayload(params: {
-  pile_rec_min: string;
   lot_tmh_min: string;
-
-  var_tmh_max: string;
-  var_tmh_target: string;
   var_tmh_min: string;
   var_g_tries: string;
-
-  bat_tmh_max: string;
   bat_tmh_target: string;
-  bat_tmh_min: string;
   bat_lot_g_min: string;
-  bat_pile_g_min: string;
-  bat_pile_g_max: string;
-
   reag_min: string;
   reag_max: string;
 }) {
   const payload: any = {};
 
-  const pile_rec_min = numOrUndef(params.pile_rec_min);
   const lot_tmh_min = numOrUndef(params.lot_tmh_min);
-
-  const var_tmh_max = numOrUndef(params.var_tmh_max);
-  const var_tmh_target = numOrUndef(params.var_tmh_target);
   const var_tmh_min = numOrUndef(params.var_tmh_min);
-  const var_g_tries = parseVarGTries(params.var_g_tries);
+  const var_g_tries = parseSinglePair(params.var_g_tries);
 
-  const bat_tmh_max = numOrUndef(params.bat_tmh_max);
   const bat_tmh_target = numOrUndef(params.bat_tmh_target);
-  const bat_tmh_min = numOrUndef(params.bat_tmh_min);
   const bat_lot_g_min = numOrUndef(params.bat_lot_g_min);
-  const bat_pile_g_min = numOrUndef(params.bat_pile_g_min);
-  const bat_pile_g_max = numOrUndef(params.bat_pile_g_max);
 
   const reag_min = numOrUndef(params.reag_min);
   const reag_max = numOrUndef(params.reag_max);
 
-  if (pile_rec_min !== undefined) payload.pile_rec_min = pile_rec_min;
   if (lot_tmh_min !== undefined) payload.lot_tmh_min = lot_tmh_min;
 
+  // solo mandar var_tmh_min y var_g_tries
   payload.varios = {};
-  if (var_tmh_max !== undefined) payload.varios.var_tmh_max = var_tmh_max;
-  if (var_tmh_target !== undefined) payload.varios.var_tmh_target = var_tmh_target;
   if (var_tmh_min !== undefined) payload.varios.var_tmh_min = var_tmh_min;
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
   if (Object.keys(payload.varios).length === 0) delete payload.varios;
 
+  // solo mandar bat_tmh_target y bat_lot_g_min
   payload.batch = {};
-  if (bat_tmh_max !== undefined) payload.batch.bat_tmh_max = bat_tmh_max;
   if (bat_tmh_target !== undefined) payload.batch.bat_tmh_target = bat_tmh_target;
-  if (bat_tmh_min !== undefined) payload.batch.bat_tmh_min = bat_tmh_min;
   if (bat_lot_g_min !== undefined) payload.batch.bat_lot_g_min = bat_lot_g_min;
-  if (bat_pile_g_min !== undefined) payload.batch.bat_pile_g_min = bat_pile_g_min;
-  if (bat_pile_g_max !== undefined) payload.batch.bat_pile_g_max = bat_pile_g_max;
   if (Object.keys(payload.batch).length === 0) delete payload.batch;
 
+  // reagentes
   payload.reagents = {};
   if (reag_min !== undefined) payload.reagents.reag_min = reag_min;
   if (reag_max !== undefined) payload.reagents.reag_max = reag_max;
@@ -361,23 +321,18 @@ function InputRow({
   onChange,
   placeholder,
   hint,
-  right,
-  width = 150,
+  width = 220,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   hint?: string;
-  right?: string;
   width?: number;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: width }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-        <b style={{ fontSize: 13 }}>{label}</b>
-        {right && <span style={{ fontSize: 12, color: "rgba(255,255,255,.75)" }}>{right}</span>}
-      </div>
+      <b style={{ fontSize: 13 }}>{label}</b>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -411,22 +366,12 @@ export default function Home() {
 
   const [view, setView] = useState<ViewKey>("1");
 
-  // ===== Params UI (strings; si vacío => default server-side) =====
-  const [pile_rec_min, setPileRecMin] = useState("");
+  // ===== Solo estos params =====
   const [lot_tmh_min, setLotTmhMin] = useState("");
-
-  const [var_tmh_max, setVarTmhMax] = useState("");
-  const [var_tmh_target, setVarTmhTarget] = useState("");
   const [var_tmh_min, setVarTmhMin] = useState("");
   const [var_g_tries, setVarGTries] = useState("");
-
-  const [bat_tmh_max, setBatTmhMax] = useState("");
   const [bat_tmh_target, setBatTmhTarget] = useState("");
-  const [bat_tmh_min, setBatTmhMin] = useState("");
   const [bat_lot_g_min, setBatLotGMin] = useState("");
-  const [bat_pile_g_min, setBatPileGMin] = useState("");
-  const [bat_pile_g_max, setBatPileGMax] = useState("");
-
   const [reag_min, setReagMin] = useState("");
   const [reag_max, setReagMax] = useState("");
 
@@ -436,12 +381,12 @@ export default function Home() {
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
-    } catch { }
+    } catch {}
   }, []);
 
   const handleLogin = () => {
     if (input === PASSWORD) {
-      try { sessionStorage.setItem("mvd_auth", "ok"); } catch { }
+      try { sessionStorage.setItem("mvd_auth", "ok"); } catch {}
       setAuthorized(true);
       setError("");
     } else {
@@ -450,7 +395,7 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    try { sessionStorage.removeItem("mvd_auth"); } catch { }
+    try { sessionStorage.removeItem("mvd_auth"); } catch {}
     setAuthorized(false);
     setInput("");
     setError("");
@@ -490,21 +435,11 @@ export default function Home() {
     setCalcMsg("");
     try {
       const payload = buildSolverPayload({
-        pile_rec_min,
         lot_tmh_min,
-
-        var_tmh_max,
-        var_tmh_target,
         var_tmh_min,
         var_g_tries,
-
-        bat_tmh_max,
         bat_tmh_target,
-        bat_tmh_min,
         bat_lot_g_min,
-        bat_pile_g_min,
-        bat_pile_g_max,
-
         reag_min,
         reag_max,
       });
@@ -518,15 +453,11 @@ export default function Home() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.error || "Error ejecutando solver");
 
-      // recarga resultados
       await loadAll();
 
       const inserted = j?.inserted;
-      if (inserted) {
-        setCalcMsg(`OK: p1=${inserted?.p1 ?? 0}, p2=${inserted?.p2 ?? 0}, p3=${inserted?.p3 ?? 0}`);
-      } else {
-        setCalcMsg("OK");
-      }
+      if (inserted) setCalcMsg(`OK: p1=${inserted?.p1 ?? 0}, p2=${inserted?.p2 ?? 0}, p3=${inserted?.p3 ?? 0}`);
+      else setCalcMsg("OK");
     } catch (e: any) {
       setCalcMsg(`❌ ${e?.message || "Error"}`);
     } finally {
@@ -692,7 +623,13 @@ export default function Home() {
             >
               {calcLoading ? "Calculando..." : "Calcular"}
             </button>
-            {calcMsg && <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>}
+
+            {calcMsg && (
+              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>
+                {calcMsg}
+              </span>
+            )}
+
             <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
               Si dejas vacío, usa el default.
             </span>
@@ -701,136 +638,58 @@ export default function Home() {
 
         <div style={{ height: 10 }} />
 
-        {/* GRID */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-          {/* Generales */}
-          <div style={{ minWidth: 260 }}>
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>Generales</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              <InputRow
-                label="PILE_REC_MIN"
-                value={pile_rec_min}
-                onChange={setPileRecMin}
-                placeholder={`${DEFAULTS.pile_rec_min}`}
-                hint="Rec promedio ponderado mínimo (%)"
-                width={180}
-              />
-              <InputRow
-                label="LOT_TMH_MIN"
-                value={lot_tmh_min}
-                onChange={setLotTmhMin}
-                placeholder={`${DEFAULTS.lot_tmh_min}`}
-                hint="Filtro mínimo TMH por lote (0 = no filtra)"
-                width={180}
-              />
-            </div>
-          </div>
+          <InputRow
+            label="TMH mínimo de Lote"
+            value={lot_tmh_min}
+            onChange={setLotTmhMin}
+            placeholder={`${DEFAULTS.lot_tmh_min}`}
+            hint="0 = no filtra"
+          />
 
-          {/* Varios */}
-          <div style={{ minWidth: 520 }}>
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>Varios</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              <InputRow
-                label="VAR_TMH_MAX"
-                value={var_tmh_max}
-                onChange={setVarTmhMax}
-                placeholder={`${DEFAULTS.varios.var_tmh_max}`}
-                width={160}
-              />
-              <InputRow
-                label="VAR_TMH_TARGET"
-                value={var_tmh_target}
-                onChange={setVarTmhTarget}
-                placeholder={`${DEFAULTS.varios.var_tmh_target}`}
-                width={160}
-              />
-              <InputRow
-                label="VAR_TMH_MIN"
-                value={var_tmh_min}
-                onChange={setVarTmhMin}
-                placeholder={`${DEFAULTS.varios.var_tmh_min}`}
-                width={160}
-              />
-              <InputRow
-                label="VAR_G_TRIES"
-                value={var_g_tries}
-                onChange={setVarGTries}
-                placeholder={DEFAULTS.varios.var_g_tries}
-                hint='Formato: "20,24; 19.5,24; 19,24"'
-                width={500}
-              />
-            </div>
-          </div>
+          <InputRow
+            label="TMH mínimo de Pila"
+            value={var_tmh_min}
+            onChange={setVarTmhMin}
+            placeholder={`${DEFAULTS.var_tmh_min}`}
+          />
 
-          {/* Batch */}
-          <div style={{ minWidth: 620 }}>
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>Batch</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              <InputRow
-                label="BAT_TMH_MAX"
-                value={bat_tmh_max}
-                onChange={setBatTmhMax}
-                placeholder={`${DEFAULTS.batch.bat_tmh_max}`}
-                width={160}
-              />
-              <InputRow
-                label="BAT_TMH_TARGET"
-                value={bat_tmh_target}
-                onChange={setBatTmhTarget}
-                placeholder={`${DEFAULTS.batch.bat_tmh_target}`}
-                width={160}
-              />
-              <InputRow
-                label="BAT_TMH_MIN"
-                value={bat_tmh_min}
-                onChange={setBatTmhMin}
-                placeholder={`${DEFAULTS.batch.bat_tmh_min}`}
-                width={160}
-              />
-              <InputRow
-                label="BAT_LOT_G_MIN"
-                value={bat_lot_g_min}
-                onChange={setBatLotGMin}
-                placeholder={`${DEFAULTS.batch.bat_lot_g_min}`}
-                width={160}
-              />
-              <InputRow
-                label="BAT_PILE_G_MIN"
-                value={bat_pile_g_min}
-                onChange={setBatPileGMin}
-                placeholder={`${DEFAULTS.batch.bat_pile_g_min}`}
-                width={160}
-              />
-              <InputRow
-                label="BAT_PILE_G_MAX"
-                value={bat_pile_g_max}
-                onChange={setBatPileGMax}
-                placeholder={`${DEFAULTS.batch.bat_pile_g_max}`}
-                width={160}
-              />
-            </div>
-          </div>
+          <InputRow
+            label="Ley Au Mínima y Máxima (g/t)"
+            value={var_g_tries}
+            onChange={setVarGTries}
+            placeholder={DEFAULTS.var_g_try}
+            hint='Formato: "20,24"'
+            width={260}
+          />
 
-          {/* Reagentes */}
-          <div style={{ minWidth: 260 }}>
-            <div style={{ fontWeight: 900, marginBottom: 8 }}>Reagentes</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-              <InputRow
-                label="REAG_MIN"
-                value={reag_min}
-                onChange={setReagMin}
-                placeholder={`${DEFAULTS.reag.reag_min}`}
-                width={160}
-              />
-              <InputRow
-                label="REAG_MAX"
-                value={reag_max}
-                onChange={setReagMax}
-                placeholder={`${DEFAULTS.reag.reag_max}`}
-                width={160}
-              />
-            </div>
-          </div>
+          <InputRow
+            label="TMH de Batch"
+            value={bat_tmh_target}
+            onChange={setBatTmhTarget}
+            placeholder={`${DEFAULTS.bat_tmh_target}`}
+          />
+
+          <InputRow
+            label="Ley Au Mínima de Batch (g/t)"
+            value={bat_lot_g_min}
+            onChange={setBatLotGMin}
+            placeholder={`${DEFAULTS.bat_lot_g_min}`}
+          />
+
+          <InputRow
+            label="Consumo Mínimo de Reactivo (kg/t)"
+            value={reag_min}
+            onChange={setReagMin}
+            placeholder={`${DEFAULTS.reag_min}`}
+          />
+
+          <InputRow
+            label="Consumo Máximo de Reactivo (kg/t)"
+            value={reag_max}
+            onChange={setReagMax}
+            placeholder={`${DEFAULTS.reag_max}`}
+          />
         </div>
       </section>
 
@@ -870,9 +729,7 @@ export default function Home() {
           );
         })}
 
-        {current.length === 0 && (
-          <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>
-        )}
+        {current.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>
     </main>
   );

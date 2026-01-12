@@ -95,6 +95,7 @@ function pileKPIs(rows: LotRow[]) {
 }
 
 const COLS = [
+  "nro",
   "codigo",
   "zona",
   "tmh",
@@ -110,7 +111,10 @@ const COLS = [
   "rec_pct",
 ] as const;
 
-const COL_LABEL: Record<(typeof COLS)[number], string> = {
+type ColKey = (typeof COLS)[number];
+
+const COL_LABEL: Record<ColKey, string> = {
+  nro: "#",
   codigo: "Código",
   zona: "Zona",
   tmh: "TMH",
@@ -194,6 +198,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+              <td style={tdStyle}>{i + 1}</td>
               <td style={tdStyle}>{r.codigo ?? ""}</td>
               <td style={tdStyle}>{r.zona ?? ""}</td>
               <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
@@ -222,7 +227,9 @@ function DataTable({ rows }: { rows: LotRow[] }) {
         {rows.length > 0 && (
           <tfoot>
             <tr>
-              <td style={tfootTd}>TOTAL</td>
+              {/* ✅ subtotal/total solo en la última fila de cada tabla */}
+              <td style={tfootTd} />
+              <td style={tfootTd}>SUBTOTAL</td>
               <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
 
               <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
@@ -660,7 +667,8 @@ export default function Home() {
       };
 
       const makeBodyRows = (rows: LotRow[]) =>
-        rows.map((r) => [
+        rows.map((r, i) => [
+          String(i + 1),
           r.codigo ?? "",
           r.zona ?? "",
           fmt(r.tmh, 2),
@@ -690,7 +698,7 @@ export default function Home() {
         const k = pileKPIs(p.lotes);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
-        // ✅ arriba en PDF también: TMS en lugar de TMH
+        // ✅ arriba en PDF: TMS en lugar de TMH
         doc.text(
           `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`,
           marginX,
@@ -698,35 +706,33 @@ export default function Home() {
         );
 
         const tot = totalsForExport(p.lotes);
-        const isLastPile = idx === piles.length - 1;
 
         autoTable(doc, {
           head,
           body: makeBodyRows(p.lotes),
 
-          // ✅ subtotal solo en la última pila exportada
-          foot: isLastPile
-            ? [
-                [
-                  "SUBTOTAL",
-                  `(${p.lotes.length} lotes)`,
-                  fmt(tot.tmhSum, 2),
-                  fmt(tot.humW, 2),
-                  fmt(tot.tmsSum, 2),
-                  fmt(tot.auW, 2),
-                  fmt(tot.auFinoSum, 2),
-                  fmt(tot.agW, 2),
-                  fmt(tot.agFinoSum, 2),
-                  fmt(tot.cuW, 2),
-                  fmt(tot.nacnW, 2),
-                  fmt(tot.naohW, 2),
-                  fmt(tot.recW, 2),
-                ],
-              ]
-            : undefined,
+          // ✅ subtotal para CADA tabla (cada pila)
+          foot: [
+            [
+              "",
+              "SUBTOTAL",
+              `(${p.lotes.length} lotes)`,
+              fmt(tot.tmhSum, 2),
+              fmt(tot.humW, 2),
+              fmt(tot.tmsSum, 2),
+              fmt(tot.auW, 2),
+              fmt(tot.auFinoSum, 2),
+              fmt(tot.agW, 2),
+              fmt(tot.agFinoSum, 2),
+              fmt(tot.cuW, 2),
+              fmt(tot.nacnW, 2),
+              fmt(tot.naohW, 2),
+              fmt(tot.recW, 2),
+            ],
+          ],
 
           // ✅ y que salga SOLO en la última hoja del table (si se parte en 2+ páginas)
-          showFoot: isLastPile ? "lastPage" : "never",
+          showFoot: "lastPage",
 
           startY: headerH + 48,
           margin: { left: marginX, right: marginX },
@@ -760,7 +766,7 @@ export default function Home() {
         });
       });
 
-      // ✅ Footer firmas solo en la última hoja
+      // ✅ Footer firmas solo en la última hoja del PDF
       const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
       const footerNeedH = 120;
       const footerTopYMin = pageH - footerNeedH;
@@ -993,7 +999,9 @@ export default function Home() {
             </button>
 
             {calcMsg && (
-              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>
+              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>
+                {calcMsg}
+              </span>
             )}
 
             <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Si dejas vacío, usa el default.</span>

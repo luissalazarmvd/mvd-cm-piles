@@ -242,8 +242,6 @@ const DEFAULTS = {
   lot_tmh_min: 0,
   var_tmh_min: 440,
   var_g_try: "20,24", // SOLO 1 PAR
-  bat_tmh_target: 120,
-  bat_lot_g_min: 70,
   reag_min: 6,
   reag_max: 8,
 };
@@ -273,8 +271,6 @@ function buildSolverPayload(params: {
   lot_tmh_min: string;
   var_tmh_min: string;
   var_g_tries: string;
-  bat_tmh_target: string;
-  bat_lot_g_min: string;
   reag_min: string;
   reag_max: string;
 }) {
@@ -284,27 +280,17 @@ function buildSolverPayload(params: {
   const var_tmh_min = numOrUndef(params.var_tmh_min);
   const var_g_tries = parseSinglePair(params.var_g_tries);
 
-  const bat_tmh_target = numOrUndef(params.bat_tmh_target);
-  const bat_lot_g_min = numOrUndef(params.bat_lot_g_min);
-
   const reag_min = numOrUndef(params.reag_min);
   const reag_max = numOrUndef(params.reag_max);
 
   if (lot_tmh_min !== undefined) payload.lot_tmh_min = lot_tmh_min;
 
-  // solo mandar var_tmh_min y var_g_tries
   payload.varios = {};
   if (var_tmh_min !== undefined) payload.varios.var_tmh_min = var_tmh_min;
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
   if (Object.keys(payload.varios).length === 0) delete payload.varios;
 
-  // solo mandar bat_tmh_target y bat_lot_g_min
-  payload.batch = {};
-  if (bat_tmh_target !== undefined) payload.batch.bat_tmh_target = bat_tmh_target;
-  if (bat_lot_g_min !== undefined) payload.batch.bat_lot_g_min = bat_lot_g_min;
-  if (Object.keys(payload.batch).length === 0) delete payload.batch;
-
-  // reagentes
+  // ✅ ya no mandamos payload.batch
   payload.reagents = {};
   if (reag_min !== undefined) payload.reagents.reag_min = reag_min;
   if (reag_max !== undefined) payload.reagents.reag_max = reag_max;
@@ -312,6 +298,7 @@ function buildSolverPayload(params: {
 
   return payload;
 }
+
 
 function InputRow({
   label,
@@ -368,8 +355,6 @@ export default function Home() {
   const [lot_tmh_min, setLotTmhMin] = useState("");
   const [var_tmh_min, setVarTmhMin] = useState("");
   const [var_g_tries, setVarGTries] = useState("");
-  const [bat_tmh_target, setBatTmhTarget] = useState("");
-  const [bat_lot_g_min, setBatLotGMin] = useState("");
   const [reag_min, setReagMin] = useState("");
   const [reag_max, setReagMax] = useState("");
 
@@ -436,8 +421,6 @@ export default function Home() {
         lot_tmh_min,
         var_tmh_min,
         var_g_tries,
-        bat_tmh_target,
-        bat_lot_g_min,
         reag_min,
         reag_max,
       });
@@ -659,20 +642,6 @@ export default function Home() {
             placeholder={DEFAULTS.var_g_try}
             hint='Formato: "20,24"'
             width={260}
-          />
-
-          <InputRow
-            label="TMH de Batch"
-            value={bat_tmh_target}
-            onChange={setBatTmhTarget}
-            placeholder={`${DEFAULTS.bat_tmh_target}`}
-          />
-
-          <InputRow
-            label="Ley Au Mínima de Batch (g/t)"
-            value={bat_lot_g_min}
-            onChange={setBatLotGMin}
-            placeholder={`${DEFAULTS.bat_lot_g_min}`}
           />
 
           <InputRow

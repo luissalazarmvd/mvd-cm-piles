@@ -98,15 +98,30 @@ function DataTable({ rows }: { rows: LotRow[] }) {
     "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
   ] as const;
 
+  // ✅ Labels bonitos para cabecera
+  const COL_LABEL: Record<(typeof cols)[number], string> = {
+    codigo: "Código",
+    zona: "Zona",
+    tmh: "TMH",
+    humedad_pct: "Humedad (%)",
+    tms: "TMS",
+    au_gr_ton: "Au (g/t)",
+    au_fino: "Au fino",
+    ag_gr_ton: "Ag (g/t)",
+    ag_fino: "Ag fino",
+    cu_pct: "Cu (%)",
+    nacn_kg_t: "NaCN (kg/t)",
+    naoh_kg_t: "NaOH (kg/t)",
+    rec_pct: "Rec (%)",
+  };
+
   const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
 
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
-
   const wavg = (get: (r: LotRow) => number) =>
     wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
 
-  // ponderados por TMS (o TMH fallback)
   const humW = wavg((r) => n(r.humedad_pct));
   const auW = wavg((r) => n(r.au_gr_ton));
   const agW = wavg((r) => n(r.ag_gr_ton));
@@ -115,16 +130,14 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   const naohW = wavg((r) => n(r.naoh_kg_t));
   const recW = wavg((r) => n(r.rec_pct));
 
-  // finos: suma directa
   const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
   const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
 
-  // styles
   const wrapStyle: React.CSSProperties = {
     borderRadius: 8,
     border: "1px solid rgba(255,255,255,.25)",
     overflow: "auto",
-    maxHeight: 420, // 👈 para que exista scroll y el TOTAL sticky tenga sentido
+    maxHeight: 420,
     background: "rgba(0,0,0,.10)",
   };
 
@@ -136,7 +149,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
     position: "sticky",
     top: 0,
     zIndex: 3,
-    background: "rgba(0,0,0,.28)", // header sticky aesthetic
+    background: "rgba(0,0,0,.28)",
     backdropFilter: "blur(6px)",
   };
 
@@ -161,7 +174,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
           <tr>
             {cols.map((c) => (
               <th key={c} style={thStyle}>
-                {c}
+                {COL_LABEL[c] ?? c}
               </th>
             ))}
           </tr>
@@ -195,7 +208,6 @@ function DataTable({ rows }: { rows: LotRow[] }) {
           )}
         </tbody>
 
-        {/* SUBTOTALES (sticky abajo) */}
         {rows.length > 0 && (
           <tfoot>
             <tr>

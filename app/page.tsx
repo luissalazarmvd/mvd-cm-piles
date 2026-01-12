@@ -248,7 +248,7 @@ const DEFAULTS = {
   lot_tms_min: 0, // ✅ ahora TMS
   lot_rec_min: 85, // ✅ default 85
   var_g_try: "20,24", // SOLO 1 PAR
-  reag_min: 6,
+  reag_min: 4,
   reag_max: 8,
 };
 
@@ -289,11 +289,11 @@ function buildSolverPayload(params: {
   const reag_min = numOrUndef(params.reag_min);
   const reag_max = numOrUndef(params.reag_max);
 
-  // ✅ ahora TMS mínimo de lote
-  if (lot_tms_min !== undefined) payload.lot_tms_min = lot_tms_min;
+  payload.filters = {};
+if (lot_tms_min !== undefined) payload.filters.lot_tms_min = lot_tms_min;
+if (lot_rec_min !== undefined) payload.filters.lot_rec_min = lot_rec_min;
+if (Object.keys(payload.filters).length === 0) delete payload.filters;
 
-  // ✅ recuperación mínima
-  if (lot_rec_min !== undefined) payload.lot_rec_min = lot_rec_min;
 
   payload.varios = {};
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;

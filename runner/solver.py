@@ -25,12 +25,17 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "bat_tms_max": 120.0,
     "bat_tms_target": 120.0,
     "bat_tms_min": 80.0,
-    "bat_lot_g_min": 30.0,
-    "bat_pile_g_min": 30.0,
-    "bat_pile_g_max": 120,
 
-    # REAGENTES
-    "reag_min": 6.0,
+    # IMPORTANTE:
+    # - bat_lot_g_min ahora por defecto NO filtra (porque batch debe armarse por ley de pila).
+    # - Si algún día quieres volver a filtrar lotes por ley, súbelo > 0 desde UI.
+    "bat_lot_g_min": 0.0,
+
+    "bat_pile_g_min": 30.0,
+    "bat_pile_g_max": 120.0,
+
+    # REAGENTES (ponderados por TMS en pila)
+    "reag_min": 4.0,
     "reag_max": 8.0,
 
     # knobs solver batch
@@ -269,6 +274,10 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(p.get("var_g_tries"), list) or len(p["var_g_tries"]) == 0:
         p["var_g_tries"] = list(DEFAULT_PARAMS["var_g_tries"])
 
+    # bat_lot_g_min no negativo
+    if float(p.get("bat_lot_g_min", 0.0) or 0.0) < 0:
+        p["bat_lot_g_min"] = 0.0
+
     return p
 
 
@@ -453,7 +462,6 @@ def build_varios_trim(
     d["au_fino"] = d["au_fino"].fillna(0.0)
 
     tms = d["tms"].to_numpy(float)
-    tmh_eff = pd.to_numeric(d["tmh_eff"], errors="coerce").fillna(0).to_numpy(float)
     g = d["au_gr_ton"].to_numpy(float)
     r = d["rec_pct"].to_numpy(float)
     cn = pd.to_numeric(d["nacn_kg_t"], errors="coerce").to_numpy(float)
@@ -583,7 +591,6 @@ def build_varios_trim(
             + (10.0 * np.abs(tms2 - tms_target))
         )
 
-        # densidad de "Au" por TMS removida (quieres sacar lo que menos duele)
         dens = au_fino[idx] / np.maximum(tms[idx], 1e-9)
 
         ord_idx = np.lexsort((
@@ -618,7 +625,7 @@ def build_varios_trim(
 
 
 # =========================
-# 5) BATCH (igual a tu solver funcional, ahora parametrizado por TMS)
+# 5) BATCH (misma lógica del solver; parametrizado por TMS)
 # =========================
 def solve_one_pile(
     lots: pd.DataFrame,
@@ -820,7 +827,7 @@ def solve_one_pile(
                         else:
                             add_tms2 = tms_arr[j] + tms_arr[kk]
                             if add_tms2 <= 0:
-                                sc = -1e18
+                                sc = -1e-18
                             else:
                                 new_tms2 = cur_tms + add_tms2
                                 new_g2  = (cur_gtms + gtms[j] + gtms[kk]) / new_tms2
@@ -907,14 +914,29 @@ def solve_one_pile(
 
 
 def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.DataFrame:
-    bat_lot_g_min = float(params["bat_lot_g_min"])
+    """
+    Batch:
+    - NO debe depender de tamaño/ley mínima por lote.
+    - Debe cumplir:
+      * TMS: [bat_tms_min, bat_tms_max] apuntando a bat_tms_target
+      * Ley de pila: [bat_pile_g_min, bat_pile_g_max]
+      * Rec ponderada >= pile_rec_min
+      * Reagentes ponderados dentro de [reag_min, reag_max] (si enforce_reagents=True)
+    """
     pile_rec_min = float(params["pile_rec_min"])
+    bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
     eligible = lots.copy()
-    eligible = eligible.dropna(subset=["au_gr_ton"]).copy()
-    eligible = eligible[eligible["au_gr_ton"] >= bat_lot_g_min].copy()
+    eligible = eligible.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    eligible = eligible[(eligible["tms"] > 0) & (eligible["tmh_eff"] > 0)].copy()
     if eligible.empty:
         return pd.DataFrame()
+
+    # opcional: si en algún momento quieres filtrar lotes por ley (por defecto 0 => no filtra)
+    if bat_lot_g_min > 0:
+        eligible = eligible[eligible["au_gr_ton"] >= bat_lot_g_min].copy()
+        if eligible.empty:
+            return pd.DataFrame()
 
     # HARD reagentes
     p = solve_one_pile(

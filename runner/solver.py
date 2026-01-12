@@ -7,26 +7,27 @@ import pandas as pd
 
 # =========================
 # DEFAULTS (misma lógica que tu script funcional)
+# AHORA: tamaño/targets por TMS (no TMH)
 # =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
     # filtros / restricciones
     "lot_rec_min": 85.0,      # filtro duro por lote
     "pile_rec_min": 85.0,     # rec ponderada de pila >= 85
-    "lot_tmh_min": 0.0,       # tmh_eff mínima por lote (0 = no filtra)
+    "lot_tms_min": 0.0,       # TMS mínima por lote (0 = no filtra)
 
-    # VARIOS
-    "var_tmh_max": 550.0,
-    "var_tmh_target": 550.0,
-    "var_tmh_min": 440.0,
+    # VARIOS (TMS)
+    "var_tms_max": 550.0,
+    "var_tms_target": 550.0,
+    "var_tms_min": 250.0,
     "var_g_tries": [(20.0, 24.0), (19.5, 24.0), (19.0, 24.0)],
 
-    # BATCH
-    "bat_tmh_max": 120.0,
-    "bat_tmh_target": 120.0,
-    "bat_tmh_min": 80.0,
-    "bat_lot_g_min": 70.0,
-    "bat_pile_g_min": 70.0,
-    "bat_pile_g_max": 1e9,
+    # BATCH (TMS)
+    "bat_tms_max": 120.0,
+    "bat_tms_target": 120.0,
+    "bat_tms_min": 80.0,
+    "bat_lot_g_min": 30.0,
+    "bat_pile_g_min": 30.0,
+    "bat_pile_g_max": 120,
 
     # REAGENTES
     "reag_min": 6.0,
@@ -69,7 +70,7 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
     Acepta:
     - [[gmin,gmax], [gmin,gmax], ...]
     - (gmin,gmax)
-    - {"gmin":..,"gmax":..} (por si tu UI lo manda así)
+    - {"gmin":..,"gmax":..}
     Si viene inválido => default
     """
     if x is None:
@@ -122,13 +123,15 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     payload puede venir de UI (req.json()).
+
     Soporta:
-    - flat keys (legacy): lot_rec_min, var_tmh_max, ...
+    - flat keys (compat)
     - nested: payload.filters / payload.varios / payload.batch / payload.reagents / payload.seeds / payload.knobs
 
-    IMPORTANTE (fix de tu resultado bajo):
-    - NO recorta var_g_tries a 1 intento. Si tu UI manda 1 par, queda 1.
-      Si manda varios, se usan varios (igual que tu script funcional con VAR_G_TRIES).
+    Cambios:
+    - Targets/capacidad por TMS: var_tms_* y bat_tms_*.
+    - Filtro min por lote: lot_tms_min.
+    - Mantiene compat con llaves antiguas tmh_* (si llegan, se mapean a tms_*).
     """
     p = dict(DEFAULT_PARAMS)
 
@@ -136,12 +139,28 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return p
 
     # ---------
+    # 0) compat legacy: si UI manda tmh_*, mapear a tms_*
+    # ---------
+    legacy_map = {
+        "lot_tmh_min": "lot_tms_min",
+        "var_tmh_max": "var_tms_max",
+        "var_tmh_target": "var_tms_target",
+        "var_tmh_min": "var_tms_min",
+        "bat_tmh_max": "bat_tms_max",
+        "bat_tmh_target": "bat_tms_target",
+        "bat_tmh_min": "bat_tms_min",
+    }
+    for lk, nk in legacy_map.items():
+        if lk in payload and nk not in payload:
+            payload[nk] = payload.get(lk)
+
+    # ---------
     # 1) flat floats (compat)
     # ---------
     for k in [
-        "lot_rec_min", "pile_rec_min", "lot_tmh_min",
-        "var_tmh_max", "var_tmh_target", "var_tmh_min",
-        "bat_tmh_max", "bat_tmh_target", "bat_tmh_min",
+        "lot_rec_min", "pile_rec_min", "lot_tms_min",
+        "var_tms_max", "var_tms_target", "var_tms_min",
+        "bat_tms_max", "bat_tms_target", "bat_tms_min",
         "bat_lot_g_min", "bat_pile_g_min", "bat_pile_g_max",
         "reag_min", "reag_max",
     ]:
@@ -153,7 +172,12 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # ---------
     if isinstance(payload.get("filters"), dict):
         f = payload["filters"]
-        for k in ["lot_rec_min", "pile_rec_min", "lot_tmh_min"]:
+
+        # compat inside filters también
+        if "lot_tmh_min" in f and "lot_tms_min" not in f:
+            f["lot_tms_min"] = f.get("lot_tmh_min")
+
+        for k in ["lot_rec_min", "pile_rec_min", "lot_tms_min"]:
             if k in f:
                 p[k] = _to_float(f.get(k), p[k])
 
@@ -162,7 +186,13 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # ---------
     if isinstance(payload.get("varios"), dict):
         v = payload["varios"]
-        for k in ["var_tmh_max", "var_tmh_target", "var_tmh_min"]:
+
+        # compat dentro de varios
+        if "var_tmh_max" in v and "var_tms_max" not in v: v["var_tms_max"] = v.get("var_tmh_max")
+        if "var_tmh_target" in v and "var_tms_target" not in v: v["var_tms_target"] = v.get("var_tmh_target")
+        if "var_tmh_min" in v and "var_tms_min" not in v: v["var_tms_min"] = v.get("var_tmh_min")
+
+        for k in ["var_tms_max", "var_tms_target", "var_tms_min"]:
             if k in v:
                 p[k] = _to_float(v.get(k), p[k])
         if "var_g_tries" in v:
@@ -170,7 +200,13 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     if isinstance(payload.get("batch"), dict):
         b = payload["batch"]
-        for k in ["bat_tmh_max", "bat_tmh_target", "bat_tmh_min", "bat_lot_g_min", "bat_pile_g_min", "bat_pile_g_max"]:
+
+        # compat dentro de batch
+        if "bat_tmh_max" in b and "bat_tms_max" not in b: b["bat_tms_max"] = b.get("bat_tmh_max")
+        if "bat_tmh_target" in b and "bat_tms_target" not in b: b["bat_tms_target"] = b.get("bat_tmh_target")
+        if "bat_tmh_min" in b and "bat_tms_min" not in b: b["bat_tms_min"] = b.get("bat_tmh_min")
+
+        for k in ["bat_tms_max", "bat_tms_target", "bat_tms_min", "bat_lot_g_min", "bat_pile_g_min", "bat_pile_g_max"]:
             if k in b:
                 p[k] = _to_float(b.get(k), p[k])
 
@@ -219,15 +255,15 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if p["reag_min"] > p["reag_max"]:
         p["reag_min"], p["reag_max"] = p["reag_max"], p["reag_min"]
 
-    if p["var_tmh_min"] > p["var_tmh_max"]:
-        p["var_tmh_min"] = p["var_tmh_max"]
+    if p["var_tms_min"] > p["var_tms_max"]:
+        p["var_tms_min"] = p["var_tms_max"]
 
-    if p["bat_tmh_min"] > p["bat_tmh_max"]:
-        p["bat_tmh_min"] = p["bat_tmh_max"]
+    if p["bat_tms_min"] > p["bat_tms_max"]:
+        p["bat_tms_min"] = p["bat_tms_max"]
 
-    # target dentro de [min,max] (evita sesgos raros por payload mal seteado)
-    p["var_tmh_target"] = max(float(p["var_tmh_min"]), min(float(p["var_tmh_target"]), float(p["var_tmh_max"])))
-    p["bat_tmh_target"] = max(float(p["bat_tmh_min"]), min(float(p["bat_tmh_target"]), float(p["bat_tmh_max"])))
+    # target dentro de [min,max]
+    p["var_tms_target"] = max(float(p["var_tms_min"]), min(float(p["var_tms_target"]), float(p["var_tms_max"])))
+    p["bat_tms_target"] = max(float(p["bat_tms_min"]), min(float(p["bat_tms_target"]), float(p["bat_tms_max"])))
 
     # var_g_tries no vacío
     if not isinstance(p.get("var_g_tries"), list) or len(p["var_g_tries"]) == 0:
@@ -252,16 +288,16 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         d = d[d["loaded_at"] == last_load].copy()
 
     num_cols = [
-        "tmh","humedad_pct","tms",
-        "au_oz_tc","au_gr_ton","au_fino",
-        "ag_oz_tc","ag_gr_ton","ag_fino",
-        "cu_pct","nacn_kg_t","naoh_kg_t","rec_pct"
+        "tmh", "humedad_pct", "tms",
+        "au_oz_tc", "au_gr_ton", "au_fino",
+        "ag_oz_tc", "ag_gr_ton", "ag_fino",
+        "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct"
     ]
     for c in num_cols:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
-    # limpieza mínima base (igual a tu script)
+    # limpieza mínima base
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
 
     # asegurar columnas
@@ -281,15 +317,19 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         (1 - d.loc[mask_tms_bad & mask_can_calc, "humedad_pct"] / 100.0)
     )
 
-    # usar tmh como capacidad/objetivo. si falta tmh, fallback a tms
+    # tmh_eff solo para reporting / cálculos secundarios; el "tamaño" ahora es tms
     d["tmh_eff"] = d["tmh"].where(d["tmh"].notna() & (d["tmh"] > 0), d["tms"])
-    d = d.dropna(subset=["tmh_eff", "tms"]).copy()
-    d = d[(d["tmh_eff"] > 0) & (d["tms"] > 0)].copy()
 
-    # filtro duro por TMH mínima por lote (tmh_eff)
-    lot_tmh_min = float(params.get("lot_tmh_min", 0.0) or 0.0)
-    if lot_tmh_min > 0:
-        d = d[d["tmh_eff"] >= lot_tmh_min].copy()
+    # requiere tms > 0 (porque ahora es la base de todo)
+    d = d.dropna(subset=["tms"]).copy()
+    d = d[(d["tms"] > 0)].copy()
+    d = d.dropna(subset=["tmh_eff"]).copy()
+    d = d[(d["tmh_eff"] > 0)].copy()
+
+    # filtro duro por TMS mínima por lote
+    lot_tms_min = float(params.get("lot_tms_min", 0.0) or 0.0)
+    if lot_tms_min > 0:
+        d = d[d["tms"] >= lot_tms_min].copy()
 
     # reagentes: si no existen, crear
     if "nacn_kg_t" not in d.columns: d["nacn_kg_t"] = np.nan
@@ -327,15 +367,16 @@ def wavg(values: pd.Series, weights: pd.Series) -> float:
     return float((v * w).sum() / denom) if denom > 0 else float("nan")
 
 def metrics(d: pd.DataFrame, pile_rec_min: float) -> dict:
+    # ponderaciones por TMS (si faltara, fallback a tmh_eff)
     w = d["tms"].where(d["tms"].notna() & (d["tms"] > 0), d["tmh_eff"])
     return {
-        "tmh": float(d["tmh_eff"].sum()),
-        "tms": float(d["tms"].sum()),
+        "tmh": float(pd.to_numeric(d["tmh_eff"], errors="coerce").fillna(0).sum()),
+        "tms": float(pd.to_numeric(d["tms"], errors="coerce").fillna(0).sum()),
         "au_gr_ton": wavg(d["au_gr_ton"], w),
         "rec_pct": wavg(d["rec_pct"], w),
         "nacn_kg_t": wavg(d["nacn_kg_t"], w),
         "naoh_kg_t": wavg(d["naoh_kg_t"], w),
-        "lowrec_tmh": float(d.loc[d["rec_pct"] < pile_rec_min, "tmh_eff"].sum()),
+        "lowrec_tms": float(pd.to_numeric(d.loc[d["rec_pct"] < pile_rec_min, "tms"], errors="coerce").fillna(0).sum()),
         "au_fino": float(pd.to_numeric(d["au_fino"], errors="coerce").fillna(0).sum()) if "au_fino" in d.columns else float("nan"),
     }
 
@@ -368,7 +409,7 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
 
 
 # =========================
-# 4) VARIOS - TRIM (misma lógica que tu script funcional)
+# 4) VARIOS - TRIM (misma lógica, ahora cortando por TMS)
 # =========================
 def build_varios_trim(
     lots: pd.DataFrame,
@@ -376,9 +417,9 @@ def build_varios_trim(
     gmax: float,
     enforce_reagents: bool,
     rec_min: float,
-    tmh_max: float,
-    tmh_target: float,
-    tmh_min: float,
+    tms_max: float,
+    tms_target: float,
+    tms_min: float,
     reag_min: float,
     reag_max: float,
 ) -> pd.DataFrame:
@@ -391,8 +432,10 @@ def build_varios_trim(
         if c not in d.columns:
             d[c] = np.nan
 
-    d = d.dropna(subset=["codigo", "tmh_eff", "tms", "au_gr_ton", "rec_pct"]).copy()
-    d = d[(d["tmh_eff"] > 0) & (d["tms"] > 0)].copy()
+    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
+    d = d[(d["tms"] > 0)].copy()
+    d = d.dropna(subset=["tmh_eff"]).copy()
+    d = d[(d["tmh_eff"] > 0)].copy()
     if d.empty:
         return pd.DataFrame()
 
@@ -409,8 +452,8 @@ def build_varios_trim(
     )
     d["au_fino"] = d["au_fino"].fillna(0.0)
 
-    tmh = d["tmh_eff"].to_numpy(float)
     tms = d["tms"].to_numpy(float)
+    tmh_eff = pd.to_numeric(d["tmh_eff"], errors="coerce").fillna(0).to_numpy(float)
     g = d["au_gr_ton"].to_numpy(float)
     r = d["rec_pct"].to_numpy(float)
     cn = pd.to_numeric(d["nacn_kg_t"], errors="coerce").to_numpy(float)
@@ -425,15 +468,15 @@ def build_varios_trim(
     n = len(d)
     keep = np.ones(n, dtype=bool)
 
-    def compute_penalty(tmh_tot, tms_tot, gtms_tot, rtms_tot, cntms_tot, ohtms_tot) -> float:
+    def compute_penalty(tms_tot, gtms_tot, rtms_tot, cntms_tot, ohtms_tot) -> float:
         if tms_tot <= 0:
             return 1e18
 
         g_avg = gtms_tot / tms_tot
         r_avg = rtms_tot / tms_tot
 
-        tmh_under = max(0.0, tmh_min - tmh_tot)
-        tmh_excess = max(0.0, tmh_tot - tmh_max)
+        tms_under = max(0.0, tms_min - tms_tot)
+        tms_excess = max(0.0, tms_tot - tms_max)
 
         g_dist = dist_to_band_scalar(g_avg, gmin, gmax)
         r_dist = max(0.0, rec_min - r_avg)
@@ -445,22 +488,21 @@ def build_varios_trim(
             reag_dist = dist_to_band_scalar(cn_avg, reag_min, reag_max) + dist_to_band_scalar(oh_avg, reag_min, reag_max)
 
         return (
-            1e12 * tmh_under
-            + 1e6  * tmh_excess
+            1e12 * tms_under
+            + 1e6  * tms_excess
             + 5e5  * g_dist
             + 5e5  * r_dist
             + (2e5 * reag_dist if enforce_reagents else 0.0)
-            + (10.0 * abs(tmh_tot - tmh_target))
+            + (10.0 * abs(tms_tot - tms_target))
         )
 
-    tmh_tot = float(tmh.sum())
     tms_tot = float(tms.sum())
     gtms_tot = float(gtms.sum())
     rtms_tot = float(rtms.sum())
     cntms_tot = float(cntms.sum())
     ohtms_tot = float(ohtms.sum())
 
-    cur_pen = compute_penalty(tmh_tot, tms_tot, gtms_tot, rtms_tot, cntms_tot, ohtms_tot)
+    cur_pen = compute_penalty(tms_tot, gtms_tot, rtms_tot, cntms_tot, ohtms_tot)
 
     max_iters = n + 5
     it = 0
@@ -475,8 +517,8 @@ def build_varios_trim(
             oh_avg = ohtms_tot / tms_tot if enforce_reagents else float("nan")
 
             ok = (
-                (tmh_tot <= tmh_max + 1e-9)
-                and (tmh_tot >= tmh_min - 1e-9)
+                (tms_tot <= tms_max + 1e-9)
+                and (tms_tot >= tms_min - 1e-9)
                 and grade_ok(g_avg, gmin, gmax, gmin_exclusive=False, gmax_inclusive=True)
                 and (r_avg >= rec_min - 1e-9)
             )
@@ -490,17 +532,14 @@ def build_varios_trim(
         if len(idx) == 0:
             return pd.DataFrame()
 
-        new_tmh = tmh_tot - tmh[idx]
-        can_remove = new_tmh >= (tmh_min - 1e-9)
         new_tms = tms_tot - tms[idx]
-        can_remove = can_remove & (new_tms > 0)
+        can_remove = (new_tms >= (tms_min - 1e-9)) & (new_tms > 0)
 
         if not np.any(can_remove):
             return pd.DataFrame()
 
         idx = idx[can_remove]
 
-        tmh2 = tmh_tot - tmh[idx]
         tms2 = tms_tot - tms[idx]
         gtms2 = gtms_tot - gtms[idx]
         rtms2 = rtms_tot - rtms[idx]
@@ -510,8 +549,8 @@ def build_varios_trim(
         g_avg2 = gtms2 / tms2
         r_avg2 = rtms2 / tms2
 
-        tmh_under2 = np.maximum(0.0, tmh_min - tmh2)
-        tmh_excess2 = np.maximum(0.0, tmh2 - tmh_max)
+        tms_under2 = np.maximum(0.0, tms_min - tms2)
+        tms_excess2 = np.maximum(0.0, tms2 - tms_max)
 
         g_dist2 = np.zeros_like(g_avg2)
         g_dist2[g_avg2 < gmin] = (gmin - g_avg2[g_avg2 < gmin])
@@ -536,32 +575,32 @@ def build_varios_trim(
             reag_dist2 = 0.0
 
         pen2 = (
-            1e12 * tmh_under2
-            + 1e6  * tmh_excess2
+            1e12 * tms_under2
+            + 1e6  * tms_excess2
             + 5e5  * g_dist2
             + 5e5  * r_dist2
             + (2e5 * reag_dist2 if enforce_reagents else 0.0)
-            + (10.0 * np.abs(tmh2 - tmh_target))
+            + (10.0 * np.abs(tms2 - tms_target))
         )
 
-        dens = au_fino[idx] / np.maximum(tmh[idx], 1e-9)
+        # densidad de "Au" por TMS removida (quieres sacar lo que menos duele)
+        dens = au_fino[idx] / np.maximum(tms[idx], 1e-9)
 
         ord_idx = np.lexsort((
-            -tmh2,   # mayor TMH remanente
-            dens,    # menor densidad de finos (pierdes menos Au/tmh)
-            pen2     # menor penalty
+            -tms2,  # mayor TMS remanente
+            dens,   # menor Au/TMS perdido
+            pen2    # menor penalty
         ))
         pick_pos = int(ord_idx[0])
         j = int(idx[pick_pos])
 
         new_pen = float(pen2[pick_pos])
 
-        need_cut = tmh_tot > tmh_max + 1e-9
+        need_cut = tms_tot > tms_max + 1e-9
         if (not need_cut) and (new_pen >= cur_pen - 1e-6):
             return pd.DataFrame()
 
         keep[j] = False
-        tmh_tot -= float(tmh[j])
         tms_tot -= float(tms[j])
         gtms_tot -= float(gtms[j])
         rtms_tot -= float(rtms[j])
@@ -579,14 +618,14 @@ def build_varios_trim(
 
 
 # =========================
-# 5) BATCH (igual a tu solver funcional, parametrizado)
+# 5) BATCH (igual a tu solver funcional, ahora parametrizado por TMS)
 # =========================
 def solve_one_pile(
     lots: pd.DataFrame,
     pile_type: str,
-    tmh_max: float,
-    tmh_target: float,
-    tmh_min: float,
+    tms_max: float,
+    tms_target: float,
+    tms_min: float,
     gmin: float,
     gmax: float,
     gmin_exclusive: bool,
@@ -607,8 +646,11 @@ def solve_one_pile(
         return pd.DataFrame()
 
     d = lots.copy()
-    d = d.dropna(subset=["codigo", "tmh_eff", "tms", "au_gr_ton", "rec_pct"]).copy()
-    d = d[(d["tmh_eff"] > 0) & (d["tms"] > 0)].copy()
+    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
+    d = d[(d["tms"] > 0)].copy()
+    # tmh_eff solo para output/metrics
+    d = d.dropna(subset=["tmh_eff"]).copy()
+    d = d[(d["tmh_eff"] > 0)].copy()
     if d.empty:
         return pd.DataFrame()
 
@@ -619,14 +661,13 @@ def solve_one_pile(
 
     d["is_lowrec"] = (d["rec_pct"] < rec_min).astype(int)
     base = d.sort_values(
-        by=["is_lowrec", "rec_pct", "tmh_eff"],
+        by=["is_lowrec", "rec_pct", "tms"],
         ascending=[True, False, False]
     ).reset_index(drop=True)
 
-    tmh_arr = base["tmh_eff"].to_numpy(float)
-    tms_arr = base["tms"].to_numpy(float)
-    g_arr   = base["au_gr_ton"].to_numpy(float)
-    r_arr   = base["rec_pct"].to_numpy(float)
+    tms_arr = pd.to_numeric(base["tms"], errors="coerce").to_numpy(float)
+    g_arr   = pd.to_numeric(base["au_gr_ton"], errors="coerce").to_numpy(float)
+    r_arr   = pd.to_numeric(base["rec_pct"], errors="coerce").to_numpy(float)
     cn_arr  = pd.to_numeric(base["nacn_kg_t"], errors="coerce").to_numpy(float)
     oh_arr  = pd.to_numeric(base["naoh_kg_t"], errors="coerce").to_numpy(float)
 
@@ -681,7 +722,6 @@ def solve_one_pile(
         used = np.zeros(n, dtype=bool)
         picked: list[int] = []
 
-        cur_tmh = 0.0
         cur_tms = 0.0
         cur_gtms = 0.0
         cur_rtms = 0.0
@@ -693,18 +733,18 @@ def solve_one_pile(
         reseeds_left = reseeds_per_iter
 
         for _step in range(max_steps):
-            if cur_tmh >= tmh_max - 1e-9:
+            if cur_tms >= tms_max - 1e-9:
                 break
 
-            cap = tmh_max - cur_tmh
-            need = max(0.0, min(tmh_target, tmh_max) - cur_tmh)
+            cap = tms_max - cur_tms
+            need = max(0.0, min(tms_target, tms_max) - cur_tms)
 
             cand = []
             while ptr < n and len(cand) < cand_sample:
                 j = int(order[ptr]); ptr += 1
                 if used[j]:
                     continue
-                if tmh_arr[j] <= 0 or tmh_arr[j] > cap + 1e-9:
+                if tms_arr[j] <= 0 or tms_arr[j] > cap + 1e-9:
                     continue
                 cand.append(j)
 
@@ -718,18 +758,17 @@ def solve_one_pile(
 
             cand_np = np.array(cand, dtype=int)
 
-            add_tmh = tmh_arr[cand_np]
             add_tms = tms_arr[cand_np]
             new_tms = cur_tms + add_tms
 
-            inv = (add_tmh <= 0) | (add_tms <= 0) | (new_tms <= 0)
+            inv = (add_tms <= 0) | (new_tms <= 0)
 
             new_g  = (cur_gtms + gtms[cand_np]) / new_tms
             new_r  = (cur_rtms + rtms[cand_np]) / new_tms
             new_cn = (cur_cntms + cntms[cand_np]) / new_tms
             new_oh = (cur_ohtms + ohtms[cand_np]) / new_tms
 
-            fill = np.minimum(add_tmh, need)
+            fill = np.minimum(add_tms, need)
 
             g_pen = grade_pen_vec(new_g)
             rec_pen = np.maximum(0.0, rec_min - new_r)
@@ -750,7 +789,7 @@ def solve_one_pile(
                 - 90.0  * rec_pen
                 - 25.0  * lowrec_pen
                 - reag_pen
-                + 0.15 * add_tmh
+                + 0.15 * add_tms
             )
 
             bad = bad_reag[cand_np]
@@ -773,15 +812,14 @@ def solve_one_pile(
                     for kk in partner_pool:
                         if kk == j:
                             continue
-                        if tmh_arr[j] + tmh_arr[kk] > cap + 1e-9:
+                        if tms_arr[j] + tms_arr[kk] > cap + 1e-9:
                             continue
 
                         if bad_reag[j] or bad_reag[kk]:
                             sc = -1e15
                         else:
-                            add_tmh2 = tmh_arr[j] + tmh_arr[kk]
                             add_tms2 = tms_arr[j] + tms_arr[kk]
-                            if add_tmh2 <= 0 or add_tms2 <= 0:
+                            if add_tms2 <= 0:
                                 sc = -1e18
                             else:
                                 new_tms2 = cur_tms + add_tms2
@@ -790,7 +828,7 @@ def solve_one_pile(
                                 new_cn2 = (cur_cntms + cntms[j] + cntms[kk]) / new_tms2
                                 new_oh2 = (cur_ohtms + ohtms[j] + ohtms[kk]) / new_tms2
 
-                                fill2 = min(add_tmh2, need)
+                                fill2 = min(add_tms2, need)
 
                                 g_pen2 = 0.0
                                 if math.isnan(new_g2):
@@ -818,7 +856,7 @@ def solve_one_pile(
                                     - 90.0  * rec_pen2
                                     - 25.0  * lowrec2
                                     - reag_pen2
-                                    + 0.15 * add_tmh2
+                                    + 0.15 * add_tms2
                                 )
 
                         if sc > best_score:
@@ -828,14 +866,13 @@ def solve_one_pile(
             for j in best_choice:
                 used[j] = True
                 picked.append(j)
-                cur_tmh += tmh_arr[j]
                 cur_tms += tms_arr[j]
                 cur_gtms += gtms[j]
                 cur_rtms += rtms[j]
                 cur_cntms += cntms[j]
                 cur_ohtms += ohtms[j]
 
-            if cur_tmh >= min(tmh_target, tmh_max) - 1e-9:
+            if cur_tms >= min(tms_target, tms_max) - 1e-9:
                 break
 
         if not picked:
@@ -844,7 +881,7 @@ def solve_one_pile(
         sol = base.iloc[picked].drop(columns=["is_lowrec"], errors="ignore").copy()
         m = metrics(sol, pile_rec_min=rec_min)
 
-        if m["tmh"] <= 0 or m["tmh"] > tmh_max + 1e-9:
+        if m["tms"] <= 0 or m["tms"] > tms_max + 1e-9:
             continue
         if m["rec_pct"] < rec_min - 1e-9:
             continue
@@ -854,9 +891,9 @@ def solve_one_pile(
             if (not reag_ok(m["nacn_kg_t"], reag_min, reag_max)) or (not reag_ok(m["naoh_kg_t"], reag_min, reag_max)):
                 continue
 
-        under = max(0.0, tmh_min - m["tmh"])
-        gap = abs(m["tmh"] - tmh_target)
-        key = (under, gap, -m["tmh"], -m["rec_pct"])
+        under = max(0.0, tms_min - m["tms"])
+        gap = abs(m["tms"] - tms_target)
+        key = (under, gap, -m["tms"], -m["rec_pct"])
         if best_key is None or key < best_key:
             best_key = key
             best_sol = sol
@@ -883,9 +920,9 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
     p = solve_one_pile(
         lots=eligible,
         pile_type="batch",
-        tmh_max=float(params["bat_tmh_max"]),
-        tmh_target=float(params["bat_tmh_target"]),
-        tmh_min=float(params["bat_tmh_min"]),
+        tms_max=float(params["bat_tms_max"]),
+        tms_target=float(params["bat_tms_target"]),
+        tms_min=float(params["bat_tms_min"]),
         gmin=float(params["bat_pile_g_min"]),
         gmax=float(params["bat_pile_g_max"]),
         gmin_exclusive=False,
@@ -902,16 +939,16 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         pair_topk=int(params["batch_pair_topk"]),
         pair_pool=int(params["batch_pair_pool"]),
     )
-    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tmh"] >= float(params["bat_tmh_min"]) - 1e-9:
+    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
         return p
 
     # SOFT reagentes
     p = solve_one_pile(
         lots=eligible,
         pile_type="batch",
-        tmh_max=float(params["bat_tmh_max"]),
-        tmh_target=float(params["bat_tmh_target"]),
-        tmh_min=float(params["bat_tmh_min"]),
+        tms_max=float(params["bat_tms_max"]),
+        tms_target=float(params["bat_tms_target"]),
+        tms_min=float(params["bat_tms_min"]),
         gmin=float(params["bat_pile_g_min"]),
         gmax=float(params["bat_pile_g_max"]),
         gmin_exclusive=False,
@@ -928,7 +965,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         pair_topk=int(params["batch_pair_topk"]),
         pair_pool=int(params["batch_pair_pool"]),
     )
-    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tmh"] >= float(params["bat_tmh_min"]) - 1e-9:
+    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
         return p
 
     return pd.DataFrame()
@@ -939,8 +976,8 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
 # =========================
 def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     pile_rec_min = float(params["pile_rec_min"])
-    var_tmh_min = float(params["var_tmh_min"])
-    var_tmh_max = float(params["var_tmh_max"])
+    var_tms_min = float(params["var_tms_min"])
+    var_tms_max = float(params["var_tms_max"])
 
     var_g_tries: List[Tuple[float, float]] = list(params["var_g_tries"])
 
@@ -952,15 +989,15 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
             gmax=float(gmax),
             enforce_reagents=True,
             rec_min=pile_rec_min,
-            tmh_max=float(params["var_tmh_max"]),
-            tmh_target=float(params["var_tmh_target"]),
-            tmh_min=float(params["var_tmh_min"]),
+            tms_max=float(params["var_tms_max"]),
+            tms_target=float(params["var_tms_target"]),
+            tms_min=float(params["var_tms_min"]),
             reag_min=float(params["reag_min"]),
             reag_max=float(params["reag_max"]),
         )
         if not p.empty:
             m = metrics(p, pile_rec_min=pile_rec_min)
-            if m["tmh"] >= var_tmh_min - 1e-9 and m["tmh"] <= var_tmh_max + 1e-9:
+            if m["tms"] >= var_tms_min - 1e-9 and m["tms"] <= var_tms_max + 1e-9:
                 return p
 
     # intento 2: reagentes soft (fallback)
@@ -971,15 +1008,15 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
             gmax=float(gmax),
             enforce_reagents=False,
             rec_min=pile_rec_min,
-            tmh_max=float(params["var_tmh_max"]),
-            tmh_target=float(params["var_tmh_target"]),
-            tmh_min=float(params["var_tmh_min"]),
+            tms_max=float(params["var_tms_max"]),
+            tms_target=float(params["var_tms_target"]),
+            tms_min=float(params["var_tms_min"]),
             reag_min=float(params["reag_min"]),
             reag_max=float(params["reag_max"]),
         )
         if not p.empty:
             m = metrics(p, pile_rec_min=pile_rec_min)
-            if m["tmh"] >= var_tmh_min - 1e-9 and m["tmh"] <= var_tmh_max + 1e-9:
+            if m["tms"] >= var_tms_min - 1e-9 and m["tms"] <= var_tms_max + 1e-9:
                 return p
 
     return pd.DataFrame()

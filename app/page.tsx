@@ -82,10 +82,7 @@ function pileKPIs(rows: LotRow[]) {
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
 
   const auWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.au_gr_ton), 0) / wSum : 0;
-
   const humWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
-
-  // ✅ Rec ponderada por w() (TMS -> TMH), igual que el TOTAL de abajo y el solver Python
   const recWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0;
 
   return { tmhSum, auWeighted, humWeighted, recWeighted };
@@ -248,8 +245,8 @@ type ViewKey = "1" | "2" | "3";
 
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
-  lot_tmh_min: 0,
-  lot_rec_min: 0, // ✅ nuevo
+  lot_tms_min: 0, // ✅ ahora TMS
+  lot_rec_min: 85, // ✅ default 85
   var_g_try: "20,24", // SOLO 1 PAR
   reag_min: 6,
   reag_max: 8,
@@ -277,31 +274,31 @@ function parseSinglePair(s: string): Array<[number, number]> | undefined {
 }
 
 function buildSolverPayload(params: {
-  lot_tmh_min: string;
-  lot_rec_min: string; // ✅ nuevo
+  lot_tms_min: string;
+  lot_rec_min: string;
   var_g_tries: string;
   reag_min: string;
   reag_max: string;
 }) {
   const payload: any = {};
 
-  const lot_tmh_min = numOrUndef(params.lot_tmh_min);
-  const lot_rec_min = numOrUndef(params.lot_rec_min); // ✅ nuevo
+  const lot_tms_min = numOrUndef(params.lot_tms_min);
+  const lot_rec_min = numOrUndef(params.lot_rec_min);
   const var_g_tries = parseSinglePair(params.var_g_tries);
 
   const reag_min = numOrUndef(params.reag_min);
   const reag_max = numOrUndef(params.reag_max);
 
-  if (lot_tmh_min !== undefined) payload.lot_tmh_min = lot_tmh_min;
+  // ✅ ahora TMS mínimo de lote
+  if (lot_tms_min !== undefined) payload.lot_tms_min = lot_tms_min;
 
-  // ✅ nuevo: variable solver
+  // ✅ recuperación mínima
   if (lot_rec_min !== undefined) payload.lot_rec_min = lot_rec_min;
 
   payload.varios = {};
   if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
   if (Object.keys(payload.varios).length === 0) delete payload.varios;
 
-  // ✅ ya no mandamos payload.batch
   payload.reagents = {};
   if (reag_min !== undefined) payload.reagents.reag_min = reag_min;
   if (reag_max !== undefined) payload.reagents.reag_max = reag_max;
@@ -363,7 +360,6 @@ function safeParseDate(s?: string) {
 }
 
 function getPileDateFromRows(allRows: LotRow[]) {
-  // usa la última fecha disponible entre loaded_at/created_at; si no hay, hoy
   let best: Date | undefined;
   for (const r of allRows) {
     const d = safeParseDate(r.loaded_at) ?? safeParseDate(r.created_at);
@@ -409,10 +405,44 @@ function addImageContain(params: {
   if (!naturalW || !naturalH) return;
 
   const s = Math.min(maxW / naturalW, maxH / naturalH, 1);
-  const w = naturalW * s;
-  const h = naturalH * s;
+  const ww = naturalW * s;
+  const hh = naturalH * s;
 
-  doc.addImage(dataUrl, "PNG", x, y, w, h); // ratio intacto
+  doc.addImage(dataUrl, "PNG", x, y, ww, hh);
+}
+
+// ✅ Totales para export: sumas (TMH/TMS/finos) y ponderados por TMS para lo demás
+function totalsForExport(rows: LotRow[]) {
+  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
+
+  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
+  const wavg = (get: (r: LotRow) => number) => (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0);
+
+  const humW = wavg((r) => n(r.humedad_pct));
+  const auW = wavg((r) => n(r.au_gr_ton));
+  const agW = wavg((r) => n(r.ag_gr_ton));
+  const cuW = wavg((r) => n(r.cu_pct));
+  const nacnW = wavg((r) => n(r.nacn_kg_t));
+  const naohW = wavg((r) => n(r.naoh_kg_t));
+  const recW = wavg((r) => n(r.rec_pct));
+
+  const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+
+  return {
+    tmhSum,
+    tmsSum,
+    auFinoSum,
+    agFinoSum,
+    humW,
+    auW,
+    agW,
+    cuW,
+    nacnW,
+    naohW,
+    recW,
+  };
 }
 
 export default function Home() {
@@ -430,8 +460,8 @@ export default function Home() {
   const [view, setView] = useState<ViewKey>("1");
 
   // ===== Solo estos params =====
-  const [lot_tmh_min, setLotTmhMin] = useState("");
-  const [lot_rec_min, setLotRecMin] = useState(""); // ✅ nuevo
+  const [lot_tms_min, setLotTmsMin] = useState("");
+  const [lot_rec_min, setLotRecMin] = useState("");
   const [var_g_tries, setVarGTries] = useState("");
   const [reag_min, setReagMin] = useState("");
   const [reag_max, setReagMax] = useState("");
@@ -505,8 +535,8 @@ export default function Home() {
     setCalcMsg("");
     try {
       const payload = buildSolverPayload({
-        lot_tmh_min,
-        lot_rec_min, // ✅ nuevo
+        lot_tms_min,
+        lot_rec_min,
         var_g_tries,
         reag_min,
         reag_max,
@@ -546,7 +576,12 @@ export default function Home() {
   const current = view === "1" ? g1 : view === "2" ? g2 : g3;
   const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : r3;
 
-  const viewTitle = view === "1" ? "Resultado 1 – 1 pila Varios" : view === "2" ? "Resultado 2 – Pilas Batch" : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
+  const viewTitle =
+    view === "1"
+      ? "Resultado 1 – 1 pila Varios"
+      : view === "2"
+      ? "Resultado 2 – Pilas Batch"
+      : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
 
   const tabBtn = (k: ViewKey, label: string) => {
     const active = view === k;
@@ -595,7 +630,6 @@ export default function Home() {
       const marginX = 28;
 
       const drawHeader = () => {
-        // Logo izquierda (SIN deformar)
         if (logoDataUrl && logoSize.w > 0 && logoSize.h > 0) {
           addImageContain({
             doc,
@@ -609,13 +643,11 @@ export default function Home() {
           });
         }
 
-        // Texto centro
         const title = `Fecha de Pila: ${dateStr}`;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(12);
         doc.text(title, pageW / 2, 34, { align: "center" });
 
-        // línea inferior header
         doc.setDrawColor(180);
         doc.setLineWidth(0.8);
         doc.line(marginX, headerH, pageW - marginX, headerH);
@@ -658,15 +690,39 @@ export default function Home() {
           headerH + 38
         );
 
+        const tot = totalsForExport(p.lotes);
+
         autoTable(doc, {
           head,
           body: makeBodyRows(p.lotes),
+          foot: [
+            [
+              "TOTAL",
+              `(${p.lotes.length} lotes)`,
+              tot.tmhSum.toFixed(2), // TMH sum
+              tot.humW.toFixed(2), // Hum ponderado (TMS->TMH)
+              tot.tmsSum.toFixed(2), // TMS sum
+              tot.auW.toFixed(2), // Au ponderado
+              tot.auFinoSum.toFixed(2), // Au fino sum
+              tot.agW.toFixed(2), // Ag ponderado
+              tot.agFinoSum.toFixed(2), // Ag fino sum
+              tot.cuW.toFixed(2), // Cu ponderado
+              tot.nacnW.toFixed(2), // NaCN ponderado
+              tot.naohW.toFixed(2), // NaOH ponderado
+              tot.recW.toFixed(2), // Rec ponderado
+            ],
+          ],
           startY: headerH + 48,
           margin: { left: marginX, right: marginX },
           styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
           theme: "grid",
           headStyles: {
             fillColor: [0, 103, 172], // #0067AC
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+          },
+          footStyles: {
+            fillColor: [10, 10, 10],
             textColor: [255, 255, 255],
             fontStyle: "bold",
           },
@@ -693,7 +749,6 @@ export default function Home() {
 
       const drawSigBlock = (cx: number, title1: string) => {
         doc.text(line, cx, yLine, { align: "center" });
-        // espacio en blanco para nombre (no imprimimos nada)
         doc.text(title1, cx, yLine + 32, { align: "center" });
         doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
       };
@@ -742,7 +797,16 @@ export default function Home() {
 
           <button
             onClick={handleLogin}
-            style={{ width: "100%", padding: 10, borderRadius: 6, border: "none", background: "#A7D8FF", color: "#003A63", fontWeight: "bold", cursor: "pointer" }}
+            style={{
+              width: "100%",
+              padding: 10,
+              borderRadius: 6,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
           >
             Ingresar
           </button>
@@ -825,47 +889,46 @@ export default function Home() {
       </div>
 
       {/* Universo de Lotes (Power BI) */}
-<section
-  style={{
-    background: "#004F86",
-    padding: 12,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,.12)",
-    marginBottom: 14,
-  }}
->
-  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-    <h2 style={{ margin: 0, fontSize: 18 }}>Universo de Lotes (Control de Minerales)</h2>
+      <section
+        style={{
+          background: "#004F86",
+          padding: 12,
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,.12)",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Universo de Lotes (Control de Minerales)</h2>
 
-    <a
-      href={PBI_LOTES_URL}
-      target="_blank"
-      rel="noreferrer"
-      style={{ color: "#A7D8FF", fontWeight: 800, textDecoration: "underline" }}
-      title="Abrir en nueva pestaña"
-    >
-      Abrir en Power BI
-    </a>
-  </div>
+          <a
+            href={PBI_LOTES_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: "#A7D8FF", fontWeight: 800, textDecoration: "underline" }}
+            title="Abrir en nueva pestaña"
+          >
+            Abrir en Power BI
+          </a>
+        </div>
 
-  <div style={{ height: 10 }} />
+        <div style={{ height: 10 }} />
 
-  <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,.15)" }}>
-    <iframe
-      src={PBI_LOTES_URL}
-      title="Control de Minerales - Lotes Disponibles"
-      width="100%"
-      height={520}
-      style={{ border: 0, display: "block", background: "white" }}
-      allowFullScreen
-    />
-  </div>
+        <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,.15)" }}>
+          <iframe
+            src={PBI_LOTES_URL}
+            title="Control de Minerales - Lotes Disponibles"
+            width="100%"
+            height={520}
+            style={{ border: 0, display: "block", background: "white" }}
+            allowFullScreen
+          />
+        </div>
 
-  <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
-    Usa los filtros del reporte para validar el universo de lotes disponible.
-  </div>
-</section>
-
+        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+          Usa los filtros del reporte para validar el universo de lotes disponible.
+        </div>
+      </section>
 
       {/* Panel de parámetros + botón Calcular */}
       <section
@@ -909,15 +972,20 @@ export default function Home() {
         <div style={{ height: 10 }} />
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-          <InputRow label="TMH mínimo de Lote" value={lot_tmh_min} onChange={setLotTmhMin} placeholder={`${DEFAULTS.lot_tmh_min}`} hint="0 = no filtra" />
+          <InputRow
+            label="TMS mínimo de Lote"
+            value={lot_tms_min}
+            onChange={setLotTmsMin}
+            placeholder={`${DEFAULTS.lot_tms_min}`}
+            hint="0 = no filtra"
+          />
 
-          {/* ✅ reemplazo: Recuperación mínima de lote */}
           <InputRow
             label="Recuperación Mínima de Lote (%)"
             value={lot_rec_min}
             onChange={setLotRecMin}
             placeholder={`${DEFAULTS.lot_rec_min}`}
-            hint="0 = no filtra"
+            hint="85"
             width={260}
           />
 

@@ -80,15 +80,13 @@ function pileKPIs(rows: LotRow[]) {
   const humWeighted =
     wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
 
-  // rec ponderada por Au_fino (si existe y >0), si no por w()
-  const auFinesSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  // ✅ Rec ponderada por w() (TMS -> TMH), igual que el TOTAL de abajo y el solver Python
   const recWeighted =
-    auFinesSum > 0
-      ? rows.reduce((acc, r) => acc + n(r.au_fino) * n(r.rec_pct), 0) / auFinesSum
-      : (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0);
+    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0;
 
   return { tmhSum, auWeighted, humWeighted, recWeighted };
 }
+
 
 function DataTable({ rows }: { rows: LotRow[] }) {
   const cols = [

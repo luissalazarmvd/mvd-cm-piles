@@ -2,6 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
+// ✅ PDF export
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+
 const PASSWORD = process.env.NEXT_PUBLIC_WEB_PASS || "";
 
 type PileType = "batch" | "varios";
@@ -74,50 +78,54 @@ function pileKPIs(rows: LotRow[]) {
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
 
-  const auWeighted =
-    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.au_gr_ton), 0) / wSum : 0;
+  const auWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.au_gr_ton), 0) / wSum : 0;
 
-  const humWeighted =
-    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
+  const humWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.humedad_pct), 0) / wSum : 0;
 
   // ✅ Rec ponderada por w() (TMS -> TMH), igual que el TOTAL de abajo y el solver Python
-  const recWeighted =
-    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0;
+  const recWeighted = wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * n(r.rec_pct), 0) / wSum : 0;
 
   return { tmhSum, auWeighted, humWeighted, recWeighted };
 }
 
+const COLS = [
+  "codigo",
+  "zona",
+  "tmh",
+  "humedad_pct",
+  "tms",
+  "au_gr_ton",
+  "au_fino",
+  "ag_gr_ton",
+  "ag_fino",
+  "cu_pct",
+  "nacn_kg_t",
+  "naoh_kg_t",
+  "rec_pct",
+] as const;
+
+const COL_LABEL: Record<(typeof COLS)[number], string> = {
+  codigo: "Código",
+  zona: "Zona",
+  tmh: "TMH",
+  humedad_pct: "Humedad (%)",
+  tms: "TMS",
+  au_gr_ton: "Au (g/t)",
+  au_fino: "Au fino (g)",
+  ag_gr_ton: "Ag (g/t)",
+  ag_fino: "Ag fino (g)",
+  cu_pct: "Cu (%)",
+  nacn_kg_t: "NaCN (kg/t)",
+  naoh_kg_t: "NaOH (kg/t)",
+  rec_pct: "Rec (%)",
+};
 
 function DataTable({ rows }: { rows: LotRow[] }) {
-  const cols = [
-    "codigo", "zona", "tmh", "humedad_pct", "tms",
-    "au_gr_ton", "au_fino",
-    "ag_gr_ton", "ag_fino",
-    "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
-  ] as const;
-
-  const COL_LABEL: Record<(typeof cols)[number], string> = {
-    codigo: "Código",
-    zona: "Zona",
-    tmh: "TMH",
-    humedad_pct: "Humedad (%)",
-    tms: "TMS",
-    au_gr_ton: "Au (g/t)",
-    au_fino: "Au fino (g)",
-    ag_gr_ton: "Ag (g/t)",
-    ag_fino: "Ag fino (g)",
-    cu_pct: "Cu (%)",
-    nacn_kg_t: "NaCN (kg/t)",
-    naoh_kg_t: "NaOH (kg/t)",
-    rec_pct: "Rec (%)",
-  };
-
   const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
   const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
 
   const wSum = rows.reduce((acc, r) => acc + w(r), 0);
-  const wavg = (get: (r: LotRow) => number) =>
-    wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
+  const wavg = (get: (r: LotRow) => number) => (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0);
 
   const humW = wavg((r) => n(r.humedad_pct));
   const auW = wavg((r) => n(r.au_gr_ton));
@@ -169,7 +177,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
-            {cols.map((c) => (
+            {COLS.map((c) => (
               <th key={c} style={thStyle}>
                 {COL_LABEL[c] ?? c}
               </th>
@@ -198,7 +206,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
 
           {rows.length === 0 && (
             <tr>
-              <td colSpan={cols.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
+              <td colSpan={COLS.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
                 Sin datos.
               </td>
             </tr>
@@ -209,9 +217,7 @@ function DataTable({ rows }: { rows: LotRow[] }) {
           <tfoot>
             <tr>
               <td style={tfootTd}>TOTAL</td>
-              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>
-                ({rows.length} lotes)
-              </td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
 
               <td style={tfootTd}>{tmhSum.toFixed(2)}</td>
               <td style={tfootTd}>{humW.toFixed(2)}</td>
@@ -299,7 +305,6 @@ function buildSolverPayload(params: {
   return payload;
 }
 
-
 function InputRow({
   label,
   value,
@@ -337,6 +342,44 @@ function InputRow({
   );
 }
 
+// ====== helpers para export ======
+function pad2(x: number) {
+  return String(x).padStart(2, "0");
+}
+
+function formatDDMMYYYY(d: Date) {
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+function safeParseDate(s?: string) {
+  if (!s) return undefined;
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) ? d : undefined;
+}
+
+function getPileDateFromRows(allRows: LotRow[]) {
+  // usa la última fecha disponible entre loaded_at/created_at; si no hay, hoy
+  let best: Date | undefined;
+  for (const r of allRows) {
+    const d = safeParseDate(r.loaded_at) ?? safeParseDate(r.created_at);
+    if (!d) continue;
+    if (!best || d.getTime() > best.getTime()) best = d;
+  }
+  return best ?? new Date();
+}
+
+async function fetchImageAsDataURL(url: string): Promise<string> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`No se pudo cargar imagen: ${url}`);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || ""));
+    fr.onerror = () => reject(new Error("No se pudo leer imagen"));
+    fr.readAsDataURL(blob);
+  });
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -361,6 +404,9 @@ export default function Home() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [calcMsg, setCalcMsg] = useState<string>("");
 
+  // ✅ export state
+  const [exportLoading, setExportLoading] = useState(false);
+
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
@@ -369,7 +415,9 @@ export default function Home() {
 
   const handleLogin = () => {
     if (input === PASSWORD) {
-      try { sessionStorage.setItem("mvd_auth", "ok"); } catch {}
+      try {
+        sessionStorage.setItem("mvd_auth", "ok");
+      } catch {}
       setAuthorized(true);
       setError("");
     } else {
@@ -378,7 +426,9 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    try { sessionStorage.removeItem("mvd_auth"); } catch {}
+    try {
+      sessionStorage.removeItem("mvd_auth");
+    } catch {}
     setAuthorized(false);
     setInput("");
     setError("");
@@ -407,7 +457,9 @@ export default function Home() {
       setR3(Array.isArray(jc?.rows) ? jc.rows : []);
     } catch (e: any) {
       setLoadError(e?.message || "Error");
-      setR1([]); setR2([]); setR3([]);
+      setR1([]);
+      setR2([]);
+      setR3([]);
     } finally {
       setLoading(false);
     }
@@ -457,13 +509,9 @@ export default function Home() {
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
   const current = view === "1" ? g1 : view === "2" ? g2 : g3;
+  const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : r3;
 
-  const viewTitle =
-    view === "1"
-      ? "Resultado 1 – 1 pila Varios"
-      : view === "2"
-        ? "Resultado 2 – Pilas Batch"
-        : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
+  const viewTitle = view === "1" ? "Resultado 1 – 1 pila Varios" : view === "2" ? "Resultado 2 – Pilas Batch" : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
 
   const tabBtn = (k: ViewKey, label: string) => {
     const active = view === k;
@@ -487,18 +535,151 @@ export default function Home() {
     );
   };
 
+  // ✅ EXPORT PDF (solo la vista seleccionada: 1,2 o 3)
+  async function exportCurrentToPDF() {
+    setExportLoading(true);
+    try {
+      const piles = current;
+      if (!piles || piles.length === 0) {
+        alert("Sin datos para exportar.");
+        return;
+      }
+
+      const pileDate = getPileDateFromRows(flatCurrentRows);
+      const dateStr = formatDDMMYYYY(pileDate);
+
+      // logo: public/export_logo.png
+      const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+
+      const headerH = 60;
+      const marginX = 28;
+
+      const drawHeader = () => {
+        // Logo izquierda
+        if (logoDataUrl) {
+          // ajusta tamaño si quieres
+          doc.addImage(logoDataUrl, "PNG", marginX, 14, 90, 32);
+        }
+
+        // Texto centro
+        const title = `Fecha de Pila: ${dateStr}`;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        const tw = doc.getTextWidth(title);
+        doc.text(title, (pageW - tw) / 2, 34);
+
+        // línea inferior header
+        doc.setDrawColor(180);
+        doc.setLineWidth(0.8);
+        doc.line(marginX, headerH, pageW - marginX, headerH);
+      };
+
+      const makeBodyRows = (rows: LotRow[]) =>
+        rows.map((r) => [
+          r.codigo ?? "",
+          r.zona ?? "",
+          fmt(r.tmh, 2),
+          fmt(r.humedad_pct, 2),
+          fmt(r.tms, 2),
+          fmt(r.au_gr_ton, 2),
+          fmt(r.au_fino, 2),
+          fmt(r.ag_gr_ton, 2),
+          fmt(r.ag_fino, 2),
+          fmt(r.cu_pct, 2),
+          fmt(r.nacn_kg_t, 2),
+          fmt(r.naoh_kg_t, 2),
+          fmt(r.rec_pct, 2),
+        ]);
+
+      const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
+
+      piles.forEach((p, idx) => {
+        if (idx > 0) doc.addPage();
+
+        drawHeader();
+
+        // subtítulo pila
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
+
+        const k = pileKPIs(p.lotes);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(
+          `TMH=${k.tmhSum.toFixed(1)} | Au=${k.auWeighted.toFixed(2)} g/t | Hum=${k.humWeighted.toFixed(2)}% | Rec=${k.recWeighted.toFixed(2)}%`,
+          marginX,
+          headerH + 38
+        );
+
+        autoTable(doc, {
+          head,
+          body: makeBodyRows(p.lotes),
+          startY: headerH + 48,
+          margin: { left: marginX, right: marginX },
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+          headStyles: { fontStyle: "bold" },
+          theme: "grid",
+        });
+      });
+
+      // ✅ Footer solo en la última hoja
+      const lastY = (doc as any).lastAutoTable?.finalY ?? (headerH + 60);
+      const footerNeedH = 120;
+      const footerTopYMin = pageH - footerNeedH;
+
+      if (lastY > footerTopYMin) doc.addPage();
+
+      // dibujar footer firmas en la última página
+      const y0 = pageH - 95;
+      const x1 = marginX;
+      const x2 = pageW / 2 - 140;
+      const x3 = pageW - marginX - 280;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+
+      const line = "-------------------------------";
+
+      const drawSig = (x: number, title1: string, title2: string, title3: string) => {
+        doc.text(line, x, y0);
+        doc.text("(tabulacion en blanco para que escriban nombre)", x, y0 + 14);
+        doc.text(title1, x, y0 + 30);
+        doc.text(title2, x, y0 + 44);
+        doc.text(title3, x, y0 + 58);
+      };
+
+      drawSig(x1, "Sub Gerencia de Planta", "Minera Veta Dorada S.A.C.", "");
+      drawSig(x2, "Supervisión de Cancha", "Minera Veta Dorada S.A.C.", "");
+      drawSig(x3, "Control de Minerales", "Minera Veta Dorada S.A.C.", "");
+
+      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
+      doc.save(fname);
+    } catch (e: any) {
+      alert(e?.message || "Error exportando");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
   if (!authorized) {
     return (
-      <main style={{
-        minHeight: "100vh",
-        backgroundColor: "#0067AC",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        fontFamily: "Arial, sans-serif",
-        color: "white",
-        padding: 16,
-      }}>
+      <main
+        style={{
+          minHeight: "100vh",
+          backgroundColor: "#0067AC",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          fontFamily: "Arial, sans-serif",
+          color: "white",
+          padding: 16,
+        }}
+      >
         <div style={{ background: "#004F86", padding: 32, borderRadius: 10, width: 340, textAlign: "center" }}>
           <img src="/logo_mvd.png" alt="MVD" style={{ height: 48, marginBottom: 16 }} />
           <h2 style={{ marginBottom: 16 }}>Acceso Control de Pilas</h2>
@@ -508,7 +689,9 @@ export default function Home() {
             placeholder="Contraseña"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLogin();
+            }}
             style={{ width: "100%", padding: 10, borderRadius: 6, border: "none", marginBottom: 12, outline: "none" }}
           />
 
@@ -526,13 +709,15 @@ export default function Home() {
   }
 
   return (
-    <main style={{
-      padding: 16,
-      fontFamily: "Arial, sans-serif",
-      backgroundColor: "#0067AC",
-      color: "white",
-      minHeight: "100vh",
-    }}>
+    <main
+      style={{
+        padding: 16,
+        fontFamily: "Arial, sans-serif",
+        backgroundColor: "#0067AC",
+        color: "white",
+        minHeight: "100vh",
+      }}
+    >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -558,6 +743,25 @@ export default function Home() {
             {loading ? "Cargando..." : "Actualizar"}
           </button>
 
+          {/* ✅ NUEVO: Exportar (según tab seleccionado) */}
+          <button
+            onClick={exportCurrentToPDF}
+            disabled={exportLoading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: exportLoading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+            title="Exporta SOLO el resultado seleccionado (tab actual)"
+          >
+            {exportLoading ? "Exportando..." : "Exportar"}
+          </button>
+
           <button
             onClick={handleLogout}
             style={{
@@ -577,13 +781,15 @@ export default function Home() {
       </div>
 
       {/* Panel de parámetros + botón Calcular */}
-      <section style={{
-        background: "#004F86",
-        padding: 12,
-        borderRadius: 10,
-        border: "1px solid rgba(255,255,255,.12)",
-        marginBottom: 14,
-      }}>
+      <section
+        style={{
+          background: "#004F86",
+          padding: 12,
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,.12)",
+          marginBottom: 14,
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Parámetros</h2>
 
@@ -606,34 +812,19 @@ export default function Home() {
             </button>
 
             {calcMsg && (
-              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>
-                {calcMsg}
-              </span>
+              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>
             )}
 
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
-              Si dejas vacío, usa el default.
-            </span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Si dejas vacío, usa el default.</span>
           </div>
         </div>
 
         <div style={{ height: 10 }} />
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-          <InputRow
-            label="TMH mínimo de Lote"
-            value={lot_tmh_min}
-            onChange={setLotTmhMin}
-            placeholder={`${DEFAULTS.lot_tmh_min}`}
-            hint="0 = no filtra"
-          />
+          <InputRow label="TMH mínimo de Lote" value={lot_tmh_min} onChange={setLotTmhMin} placeholder={`${DEFAULTS.lot_tmh_min}`} hint="0 = no filtra" />
 
-          <InputRow
-            label="TMH mínimo de Pila"
-            value={var_tmh_min}
-            onChange={setVarTmhMin}
-            placeholder={`${DEFAULTS.var_tmh_min}`}
-          />
+          <InputRow label="TMH mínimo de Pila" value={var_tmh_min} onChange={setVarTmhMin} placeholder={`${DEFAULTS.var_tmh_min}`} />
 
           <InputRow
             label="Ley Au Mínima y Máxima (g/t)"
@@ -644,19 +835,9 @@ export default function Home() {
             width={260}
           />
 
-          <InputRow
-            label="Consumo Mínimo de Reactivo (kg/t)"
-            value={reag_min}
-            onChange={setReagMin}
-            placeholder={`${DEFAULTS.reag_min}`}
-          />
+          <InputRow label="Consumo Mínimo de Reactivo (kg/t)" value={reag_min} onChange={setReagMin} placeholder={`${DEFAULTS.reag_min}`} />
 
-          <InputRow
-            label="Consumo Máximo de Reactivo (kg/t)"
-            value={reag_max}
-            onChange={setReagMax}
-            placeholder={`${DEFAULTS.reag_max}`}
-          />
+          <InputRow label="Consumo Máximo de Reactivo (kg/t)" value={reag_max} onChange={setReagMax} placeholder={`${DEFAULTS.reag_max}`} />
         </div>
       </section>
 
@@ -686,7 +867,9 @@ export default function Home() {
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                <b>Pila #{pile_code} ({pile_type})</b>
+                <b>
+                  Pila #{pile_code} ({pile_type})
+                </b>
                 <span style={{ color: "rgba(255,255,255,.85)" }}>
                   TMH={k.tmhSum.toFixed(1)} | Au={k.auWeighted.toFixed(2)} g/t | Hum={k.humWeighted.toFixed(2)}% | Rec={k.recWeighted.toFixed(2)}%
                 </span>

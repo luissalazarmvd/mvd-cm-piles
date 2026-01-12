@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const PASSWORD = process.env.NEXT_PUBLIC_WEB_PASS || "";
 
@@ -98,7 +98,6 @@ function DataTable({ rows }: { rows: LotRow[] }) {
     "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
   ] as const;
 
-  // ✅ Labels bonitos para cabecera
   const COL_LABEL: Record<(typeof cols)[number], string> = {
     codigo: "Código",
     zona: "Zona",
@@ -240,6 +239,164 @@ function DataTable({ rows }: { rows: LotRow[] }) {
 
 type ViewKey = "1" | "2" | "3";
 
+/** Defaults (solo para placeholder/hint en UI) */
+const DEFAULTS = {
+  pile_rec_min: 85,
+  lot_tmh_min: 0, // NUEVO: mínimo TMH por lote (si 0 = no filtra)
+  varios: {
+    var_tmh_max: 550,
+    var_tmh_target: 550,
+    var_tmh_min: 440,
+    var_g_tries: "20,24; 19.5,24; 19,24",
+  },
+  batch: {
+    bat_tmh_max: 120,
+    bat_tmh_target: 120,
+    bat_tmh_min: 80,
+    bat_lot_g_min: 70,
+    bat_pile_g_min: 70,
+    bat_pile_g_max: 1e9,
+  },
+  reag: {
+    reag_min: 6,
+    reag_max: 8,
+  },
+};
+
+function numOrUndef(x: string): number | undefined {
+  const s = (x ?? "").trim();
+  if (!s) return undefined;
+  const v = Number(s);
+  return Number.isFinite(v) ? v : undefined;
+}
+
+function parseVarGTries(s: string): Array<[number, number]> | undefined {
+  const raw = (s ?? "").trim();
+  if (!raw) return undefined;
+
+  // formato: "20,24; 19.5,24; 19,24"
+  const parts = raw.split(";").map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return undefined;
+
+  const out: Array<[number, number]> = [];
+  for (const p of parts) {
+    const [a, b] = p.split(",").map(x => x.trim());
+    const gmin = Number(a);
+    const gmax = Number(b);
+    if (!Number.isFinite(gmin) || !Number.isFinite(gmax)) continue;
+    out.push([gmin, gmax]);
+  }
+  return out.length ? out : undefined;
+}
+
+function buildSolverPayload(params: {
+  pile_rec_min: string;
+  lot_tmh_min: string;
+
+  var_tmh_max: string;
+  var_tmh_target: string;
+  var_tmh_min: string;
+  var_g_tries: string;
+
+  bat_tmh_max: string;
+  bat_tmh_target: string;
+  bat_tmh_min: string;
+  bat_lot_g_min: string;
+  bat_pile_g_min: string;
+  bat_pile_g_max: string;
+
+  reag_min: string;
+  reag_max: string;
+}) {
+  const payload: any = {};
+
+  const pile_rec_min = numOrUndef(params.pile_rec_min);
+  const lot_tmh_min = numOrUndef(params.lot_tmh_min);
+
+  const var_tmh_max = numOrUndef(params.var_tmh_max);
+  const var_tmh_target = numOrUndef(params.var_tmh_target);
+  const var_tmh_min = numOrUndef(params.var_tmh_min);
+  const var_g_tries = parseVarGTries(params.var_g_tries);
+
+  const bat_tmh_max = numOrUndef(params.bat_tmh_max);
+  const bat_tmh_target = numOrUndef(params.bat_tmh_target);
+  const bat_tmh_min = numOrUndef(params.bat_tmh_min);
+  const bat_lot_g_min = numOrUndef(params.bat_lot_g_min);
+  const bat_pile_g_min = numOrUndef(params.bat_pile_g_min);
+  const bat_pile_g_max = numOrUndef(params.bat_pile_g_max);
+
+  const reag_min = numOrUndef(params.reag_min);
+  const reag_max = numOrUndef(params.reag_max);
+
+  if (pile_rec_min !== undefined) payload.pile_rec_min = pile_rec_min;
+  if (lot_tmh_min !== undefined) payload.lot_tmh_min = lot_tmh_min;
+
+  payload.varios = {};
+  if (var_tmh_max !== undefined) payload.varios.var_tmh_max = var_tmh_max;
+  if (var_tmh_target !== undefined) payload.varios.var_tmh_target = var_tmh_target;
+  if (var_tmh_min !== undefined) payload.varios.var_tmh_min = var_tmh_min;
+  if (var_g_tries !== undefined) payload.varios.var_g_tries = var_g_tries;
+  if (Object.keys(payload.varios).length === 0) delete payload.varios;
+
+  payload.batch = {};
+  if (bat_tmh_max !== undefined) payload.batch.bat_tmh_max = bat_tmh_max;
+  if (bat_tmh_target !== undefined) payload.batch.bat_tmh_target = bat_tmh_target;
+  if (bat_tmh_min !== undefined) payload.batch.bat_tmh_min = bat_tmh_min;
+  if (bat_lot_g_min !== undefined) payload.batch.bat_lot_g_min = bat_lot_g_min;
+  if (bat_pile_g_min !== undefined) payload.batch.bat_pile_g_min = bat_pile_g_min;
+  if (bat_pile_g_max !== undefined) payload.batch.bat_pile_g_max = bat_pile_g_max;
+  if (Object.keys(payload.batch).length === 0) delete payload.batch;
+
+  payload.reagents = {};
+  if (reag_min !== undefined) payload.reagents.reag_min = reag_min;
+  if (reag_max !== undefined) payload.reagents.reag_max = reag_max;
+  if (Object.keys(payload.reagents).length === 0) delete payload.reagents;
+
+  return payload;
+}
+
+function InputRow({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  right,
+  width = 150,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  hint?: string;
+  right?: string;
+  width?: number;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: width }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+        <b style={{ fontSize: 13 }}>{label}</b>
+        {right && <span style={{ fontSize: 12, color: "rgba(255,255,255,.75)" }}>{right}</span>}
+      </div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          padding: "10px 10px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,.25)",
+          background: "rgba(0,0,0,.12)",
+          color: "white",
+          outline: "none",
+          fontSize: 13,
+        }}
+      />
+      {hint && <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>{hint}</span>}
+    </div>
+  );
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -254,15 +411,37 @@ export default function Home() {
 
   const [view, setView] = useState<ViewKey>("1");
 
+  // ===== Params UI (strings; si vacío => default server-side) =====
+  const [pile_rec_min, setPileRecMin] = useState("");
+  const [lot_tmh_min, setLotTmhMin] = useState("");
+
+  const [var_tmh_max, setVarTmhMax] = useState("");
+  const [var_tmh_target, setVarTmhTarget] = useState("");
+  const [var_tmh_min, setVarTmhMin] = useState("");
+  const [var_g_tries, setVarGTries] = useState("");
+
+  const [bat_tmh_max, setBatTmhMax] = useState("");
+  const [bat_tmh_target, setBatTmhTarget] = useState("");
+  const [bat_tmh_min, setBatTmhMin] = useState("");
+  const [bat_lot_g_min, setBatLotGMin] = useState("");
+  const [bat_pile_g_min, setBatPileGMin] = useState("");
+  const [bat_pile_g_max, setBatPileGMax] = useState("");
+
+  const [reag_min, setReagMin] = useState("");
+  const [reag_max, setReagMax] = useState("");
+
+  const [calcLoading, setCalcLoading] = useState(false);
+  const [calcMsg, setCalcMsg] = useState<string>("");
+
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
-    } catch {}
+    } catch { }
   }, []);
 
   const handleLogin = () => {
     if (input === PASSWORD) {
-      try { sessionStorage.setItem("mvd_auth", "ok"); } catch {}
+      try { sessionStorage.setItem("mvd_auth", "ok"); } catch { }
       setAuthorized(true);
       setError("");
     } else {
@@ -271,7 +450,7 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    try { sessionStorage.removeItem("mvd_auth"); } catch {}
+    try { sessionStorage.removeItem("mvd_auth"); } catch { }
     setAuthorized(false);
     setInput("");
     setError("");
@@ -306,9 +485,59 @@ export default function Home() {
     }
   }
 
+  async function runSolver() {
+    setCalcLoading(true);
+    setCalcMsg("");
+    try {
+      const payload = buildSolverPayload({
+        pile_rec_min,
+        lot_tmh_min,
+
+        var_tmh_max,
+        var_tmh_target,
+        var_tmh_min,
+        var_g_tries,
+
+        bat_tmh_max,
+        bat_tmh_target,
+        bat_tmh_min,
+        bat_lot_g_min,
+        bat_pile_g_min,
+        bat_pile_g_max,
+
+        reag_min,
+        reag_max,
+      });
+
+      const res = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Error ejecutando solver");
+
+      // recarga resultados
+      await loadAll();
+
+      const inserted = j?.inserted;
+      if (inserted) {
+        setCalcMsg(`OK: p1=${inserted?.p1 ?? 0}, p2=${inserted?.p2 ?? 0}, p3=${inserted?.p3 ?? 0}`);
+      } else {
+        setCalcMsg("OK");
+      }
+    } catch (e: any) {
+      setCalcMsg(`❌ ${e?.message || "Error"}`);
+    } finally {
+      setCalcLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!authorized) return;
     loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authorized]);
 
   const g1 = useMemo(() => groupByPile(r1), [r1]);
@@ -434,6 +663,176 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {/* Panel de parámetros + botón Calcular */}
+      <section style={{
+        background: "#004F86",
+        padding: 12,
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,.12)",
+        marginBottom: 14,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Parámetros</h2>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={runSolver}
+              disabled={calcLoading}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: "none",
+                background: "#A7D8FF",
+                color: "#003A63",
+                fontWeight: 900,
+                cursor: calcLoading ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {calcLoading ? "Calculando..." : "Calcular"}
+            </button>
+            {calcMsg && <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>}
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+              Si dejas vacío, usa el default.
+            </span>
+          </div>
+        </div>
+
+        <div style={{ height: 10 }} />
+
+        {/* GRID */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+          {/* Generales */}
+          <div style={{ minWidth: 260 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Generales</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <InputRow
+                label="PILE_REC_MIN"
+                value={pile_rec_min}
+                onChange={setPileRecMin}
+                placeholder={`${DEFAULTS.pile_rec_min}`}
+                hint="Rec promedio ponderado mínimo (%)"
+                width={180}
+              />
+              <InputRow
+                label="LOT_TMH_MIN"
+                value={lot_tmh_min}
+                onChange={setLotTmhMin}
+                placeholder={`${DEFAULTS.lot_tmh_min}`}
+                hint="Filtro mínimo TMH por lote (0 = no filtra)"
+                width={180}
+              />
+            </div>
+          </div>
+
+          {/* Varios */}
+          <div style={{ minWidth: 520 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Varios</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <InputRow
+                label="VAR_TMH_MAX"
+                value={var_tmh_max}
+                onChange={setVarTmhMax}
+                placeholder={`${DEFAULTS.varios.var_tmh_max}`}
+                width={160}
+              />
+              <InputRow
+                label="VAR_TMH_TARGET"
+                value={var_tmh_target}
+                onChange={setVarTmhTarget}
+                placeholder={`${DEFAULTS.varios.var_tmh_target}`}
+                width={160}
+              />
+              <InputRow
+                label="VAR_TMH_MIN"
+                value={var_tmh_min}
+                onChange={setVarTmhMin}
+                placeholder={`${DEFAULTS.varios.var_tmh_min}`}
+                width={160}
+              />
+              <InputRow
+                label="VAR_G_TRIES"
+                value={var_g_tries}
+                onChange={setVarGTries}
+                placeholder={DEFAULTS.varios.var_g_tries}
+                hint='Formato: "20,24; 19.5,24; 19,24"'
+                width={500}
+              />
+            </div>
+          </div>
+
+          {/* Batch */}
+          <div style={{ minWidth: 620 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Batch</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <InputRow
+                label="BAT_TMH_MAX"
+                value={bat_tmh_max}
+                onChange={setBatTmhMax}
+                placeholder={`${DEFAULTS.batch.bat_tmh_max}`}
+                width={160}
+              />
+              <InputRow
+                label="BAT_TMH_TARGET"
+                value={bat_tmh_target}
+                onChange={setBatTmhTarget}
+                placeholder={`${DEFAULTS.batch.bat_tmh_target}`}
+                width={160}
+              />
+              <InputRow
+                label="BAT_TMH_MIN"
+                value={bat_tmh_min}
+                onChange={setBatTmhMin}
+                placeholder={`${DEFAULTS.batch.bat_tmh_min}`}
+                width={160}
+              />
+              <InputRow
+                label="BAT_LOT_G_MIN"
+                value={bat_lot_g_min}
+                onChange={setBatLotGMin}
+                placeholder={`${DEFAULTS.batch.bat_lot_g_min}`}
+                width={160}
+              />
+              <InputRow
+                label="BAT_PILE_G_MIN"
+                value={bat_pile_g_min}
+                onChange={setBatPileGMin}
+                placeholder={`${DEFAULTS.batch.bat_pile_g_min}`}
+                width={160}
+              />
+              <InputRow
+                label="BAT_PILE_G_MAX"
+                value={bat_pile_g_max}
+                onChange={setBatPileGMax}
+                placeholder={`${DEFAULTS.batch.bat_pile_g_max}`}
+                width={160}
+              />
+            </div>
+          </div>
+
+          {/* Reagentes */}
+          <div style={{ minWidth: 260 }}>
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>Reagentes</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              <InputRow
+                label="REAG_MIN"
+                value={reag_min}
+                onChange={setReagMin}
+                placeholder={`${DEFAULTS.reag.reag_min}`}
+                width={160}
+              />
+              <InputRow
+                label="REAG_MAX"
+                value={reag_max}
+                onChange={setReagMax}
+                placeholder={`${DEFAULTS.reag.reag_max}`}
+                width={160}
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>

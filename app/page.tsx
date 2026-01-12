@@ -692,42 +692,53 @@ export default function Home() {
 
         const tot = totalsForExport(p.lotes);
 
-        autoTable(doc, {
-          head,
-          body: makeBodyRows(p.lotes),
-          foot: [
-            [
-              "TOTAL",
-              `(${p.lotes.length} lotes)`,
-              tot.tmhSum.toFixed(2), // TMH sum
-              tot.humW.toFixed(2), // Hum ponderado (TMS->TMH)
-              tot.tmsSum.toFixed(2), // TMS sum
-              tot.auW.toFixed(2), // Au ponderado
-              tot.auFinoSum.toFixed(2), // Au fino sum
-              tot.agW.toFixed(2), // Ag ponderado
-              tot.agFinoSum.toFixed(2), // Ag fino sum
-              tot.cuW.toFixed(2), // Cu ponderado
-              tot.nacnW.toFixed(2), // NaCN ponderado
-              tot.naohW.toFixed(2), // NaOH ponderado
-              tot.recW.toFixed(2), // Rec ponderado
-            ],
-          ],
-          startY: headerH + 48,
-          margin: { left: marginX, right: marginX },
-          styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-          theme: "grid",
-          headStyles: {
-            fillColor: [0, 103, 172], // #0067AC
-            textColor: [255, 255, 255],
-            fontStyle: "bold",
-          },
-          footStyles: {
-            fillColor: [10, 10, 10],
-            textColor: [255, 255, 255],
-            fontStyle: "bold",
-          },
-        });
-      });
+        const isLastPile = idx === piles.length - 1;
+
+autoTable(doc, {
+  head,
+  body: makeBodyRows(p.lotes),
+
+  // ✅ subtotal solo en la última pila exportada
+  foot: isLastPile
+    ? [[
+        "SUBTOTAL",
+        `(${p.lotes.length} lotes)`,
+        tot.tmhSum.toFixed(2),
+        tot.humW.toFixed(2),
+        tot.tmsSum.toFixed(2),
+        tot.auW.toFixed(2),
+        tot.auFinoSum.toFixed(2),
+        tot.agW.toFixed(2),
+        tot.agFinoSum.toFixed(2),
+        tot.cuW.toFixed(2),
+        tot.nacnW.toFixed(2),
+        tot.naohW.toFixed(2),
+        tot.recW.toFixed(2),
+      ]]
+    : undefined,
+
+  // ✅ y que salga SOLO en la última hoja del table (si se parte en 2+ páginas)
+  showFoot: isLastPile ? "lastPage" : "never",
+
+  startY: headerH + 48,
+  margin: { left: marginX, right: marginX },
+  styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+  theme: "grid",
+
+  headStyles: {
+    fillColor: [0, 103, 172], // #0067AC
+    textColor: [255, 255, 255],
+    fontStyle: "bold",
+  },
+
+  // ✅ subtotal blanco + letras #0067AC en negrita
+  footStyles: {
+    fillColor: [255, 255, 255],
+    textColor: [0, 103, 172],
+    fontStyle: "bold",
+  },
+});
+
 
       // ✅ Footer solo en la última hoja
       const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;

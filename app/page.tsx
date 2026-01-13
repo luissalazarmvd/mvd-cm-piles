@@ -1031,6 +1031,12 @@ export default function Home() {
   const g2 = useMemo(() => groupByPile(r2), [r2]);
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
+  // ✅ Baja recuperación agrupada por clasificación (para web)
+  const lowRecGroups = useMemo(() => {
+  return groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
+  }, [r4]);
+
+
   const current = view === "1" ? g1 : view === "2" ? g2 : view === "3" ? g3 : [];
   const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : view === "3" ? r3 : r4;
 
@@ -1858,24 +1864,49 @@ export default function Home() {
         <h2 style={{ margin: "0 0 10px 0" }}>{viewTitle}</h2>
 
         {/* ✅ Resultado 4 */}
-        {view === "4" && (
-          <div
-            style={{
-              marginBottom: 14,
-              background: "#004F86",
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,.12)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-              <b>Baja Recuperación</b>
-              <span style={{ color: "rgba(255,255,255,.85)" }}>({r4.length} lotes)</span>
-            </div>
+{view === "4" && (
+  <>
+    {/* TOTAL */}
+    <div
+      style={{
+        marginBottom: 14,
+        background: "#004F86",
+        padding: 12,
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,.12)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+        <b>Baja Recuperación (Total)</b>
+        <span style={{ color: "rgba(255,255,255,.85)" }}>({r4.length} lotes)</span>
+      </div>
 
-            <DataTableLowRec rows={r4} />
-          </div>
-        )}
+      <DataTableLowRec rows={r4} />
+    </div>
+
+    {/* POR CLASIFICACIÓN */}
+    {lowRecGroups.map((g) => (
+      <div
+        key={`lowrec-${g.rec_class}`}
+        style={{
+          marginBottom: 14,
+          background: "#004F86",
+          padding: 12,
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,.12)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+          <b>Baja Recuperación – {g.rec_class}</b>
+          <span style={{ color: "rgba(255,255,255,.85)" }}>({g.rows.length} lotes)</span>
+        </div>
+
+        <DataTableLowRec rows={g.rows} />
+      </div>
+    ))}
+  </>
+)}
+
 
         {/* ✅ Resultados 1/2/3 */}
         {view !== "4" &&

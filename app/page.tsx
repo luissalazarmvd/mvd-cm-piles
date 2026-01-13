@@ -16,8 +16,12 @@ const PBI_LOTES_URL =
   "https://app.powerbi.com/view?r=eyJrIjoiODg3NGQ5YWEtY2VjZS00ZWFiLTk3MjUtZjI4MzMxZmJkZDQxIiwidCI6IjYzNzhiZmNkLWRjYjktNDMwZi05Nzc4LWRiNTk3NGRjMmFkYyIsImMiOjR9";
 
 type PileType = "batch" | "varios";
+type ViewKey = "1" | "2" | "3" | "4";
 
 type LotRow = {
+  // ✅ internal key for selection
+  _k?: string;
+
   id?: number;
   pile_code?: number;
   pile_type?: PileType;
@@ -102,6 +106,7 @@ function pileKPIs(rows: LotRow[]) {
 }
 
 const COLS = [
+  "sel",
   "nro",
   "codigo",
   "zona",
@@ -119,6 +124,7 @@ const COLS = [
 ] as const;
 
 const COLS_LOWREC = [
+  "sel",
   "nro",
   "codigo",
   "zona",
@@ -140,6 +146,7 @@ type ColKey = (typeof COLS)[number];
 type ColKeyLow = (typeof COLS_LOWREC)[number];
 
 const COL_LABEL: Record<ColKey, string> = {
+  sel: "Sel",
   nro: "#",
   codigo: "Código",
   zona: "Zona",
@@ -157,16 +164,43 @@ const COL_LABEL: Record<ColKey, string> = {
 };
 
 const COL_LABEL_LOWREC: Record<ColKeyLow, string> = {
-  ...COL_LABEL,
+  ...(COL_LABEL as any),
   rec_class: "Clasificación",
 };
 
-function DataTable({ rows }: { rows: LotRow[] }) {
-  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
-  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+type SelectedMap = Record<string, boolean>;
 
-  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
-  const wavg = (get: (r: LotRow) => number) => (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0);
+function filterSelected(rows: LotRow[], selected: SelectedMap) {
+  return rows.filter((r) => !!r._k && selected[r._k] !== false); // default TRUE
+}
+
+function DataTable({
+  rows,
+  selected,
+  onToggle,
+  onSetMany,
+}: {
+  rows: LotRow[];
+  selected: SelectedMap;
+  onToggle: (rowKey: string) => void;
+  onSetMany: (rowKeys: string[], value: boolean) => void;
+}) {
+  const keys = useMemo(() => rows.map((r) => r._k).filter(Boolean) as string[], [rows]);
+
+  const selectedRows = useMemo(() => filterSelected(rows, selected), [rows, selected]);
+
+  const selectedCount = selectedRows.length;
+  const allCount = rows.length;
+
+  const allSelected = keys.length > 0 && keys.every((k) => selected[k] !== false);
+  const noneSelected = keys.length > 0 && keys.every((k) => selected[k] === false);
+
+  const tmsSum = selectedRows.reduce((acc, r) => acc + n(r.tms), 0);
+  const tmhSum = selectedRows.reduce((acc, r) => acc + n(r.tmh), 0);
+
+  const wSum = selectedRows.reduce((acc, r) => acc + w(r), 0);
+  const wavg = (get: (r: LotRow) => number) =>
+    wSum > 0 ? selectedRows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
 
   const humW = wavg((r) => n(r.humedad_pct));
   const auW = wavg((r) => n(r.au_gr_ton));
@@ -176,8 +210,8 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   const naohW = wavg((r) => n(r.naoh_kg_t));
   const recW = wavg((r) => n(r.rec_pct));
 
-  const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
-  const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+  const auFinoSum = selectedRows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = selectedRows.reduce((acc, r) => acc + n(r.ag_fino), 0);
 
   const wrapStyle: React.CSSProperties = {
     borderRadius: 8,
@@ -218,33 +252,72 @@ function DataTable({ rows }: { rows: LotRow[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
-            {COLS.map((c) => (
-              <th key={c} style={thStyle}>
-                {COL_LABEL[c] ?? c}
-              </th>
-            ))}
+            {COLS.map((c) => {
+              if (c === "sel") {
+                return (
+                  <th key={c} style={{ ...thStyle, width: 54 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected && !noneSelected}
+                      ref={(el) => {
+                        if (!el) return;
+                        el.indeterminate = !allSelected && !noneSelected;
+                      }}
+                      onChange={(e) => onSetMany(keys, e.target.checked)}
+                      title="Seleccionar/Deseleccionar todos"
+                      style={{ width: 16, height: 16, cursor: "pointer" }}
+                    />
+                  </th>
+                );
+              }
+              return (
+                <th key={c} style={thStyle}>
+                  {COL_LABEL[c] ?? c}
+                </th>
+              );
+            })}
           </tr>
         </thead>
 
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-              <td style={tdStyle}>{i + 1}</td>
-              <td style={tdStyle}>{r.codigo ?? ""}</td>
-              <td style={tdStyle}>{r.zona ?? ""}</td>
-              <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
-              <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
-              <td style={tdStyle}>{fmt(r.tms, 2)}</td>
-              <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
-              <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
-              <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
-              <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
-              <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
-              <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
-              <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
-              <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const k = r._k || `${i}`;
+            const isSel = selected[k] !== false; // default true
+            return (
+              <tr
+                key={k}
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,.08)",
+                  opacity: isSel ? 1 : 0.45,
+                }}
+              >
+                <td style={tdStyle}>
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => onToggle(k)}
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                    title="Incluir en export/sumas"
+                  />
+                </td>
+
+                <td style={tdStyle}>{i + 1}</td>
+                <td style={tdStyle}>{r.codigo ?? ""}</td>
+                <td style={tdStyle}>{r.zona ?? ""}</td>
+                <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
+                <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.tms, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
+              </tr>
+            );
+          })}
 
           {rows.length === 0 && (
             <tr>
@@ -259,8 +332,11 @@ function DataTable({ rows }: { rows: LotRow[] }) {
           <tfoot>
             <tr>
               <td style={tfootTd} />
+              <td style={tfootTd} />
               <td style={tfootTd}>SUBTOTAL</td>
-              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>
+                ({selectedCount} sel / {allCount})
+              </td>
 
               <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
               <td style={tfootTd}>{fmt(humW, 2)}</td>
@@ -284,12 +360,33 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   );
 }
 
-function DataTableLowRec({ rows }: { rows: LotRow[] }) {
-  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
-  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+function DataTableLowRec({
+  rows,
+  selected,
+  onToggle,
+  onSetMany,
+}: {
+  rows: LotRow[];
+  selected: SelectedMap;
+  onToggle: (rowKey: string) => void;
+  onSetMany: (rowKeys: string[], value: boolean) => void;
+}) {
+  const keys = useMemo(() => rows.map((r) => r._k).filter(Boolean) as string[], [rows]);
 
-  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
-  const wavg = (get: (r: LotRow) => number) => (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0);
+  const selectedRows = useMemo(() => filterSelected(rows, selected), [rows, selected]);
+
+  const selectedCount = selectedRows.length;
+  const allCount = rows.length;
+
+  const allSelected = keys.length > 0 && keys.every((k) => selected[k] !== false);
+  const noneSelected = keys.length > 0 && keys.every((k) => selected[k] === false);
+
+  const tmsSum = selectedRows.reduce((acc, r) => acc + n(r.tms), 0);
+  const tmhSum = selectedRows.reduce((acc, r) => acc + n(r.tmh), 0);
+
+  const wSum = selectedRows.reduce((acc, r) => acc + w(r), 0);
+  const wavg = (get: (r: LotRow) => number) =>
+    wSum > 0 ? selectedRows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
 
   const humW = wavg((r) => n(r.humedad_pct));
   const auW = wavg((r) => n(r.au_gr_ton));
@@ -299,8 +396,8 @@ function DataTableLowRec({ rows }: { rows: LotRow[] }) {
   const naohW = wavg((r) => n(r.naoh_kg_t));
   const recW = wavg((r) => n(r.rec_pct));
 
-  const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
-  const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+  const auFinoSum = selectedRows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = selectedRows.reduce((acc, r) => acc + n(r.ag_fino), 0);
 
   const wrapStyle: React.CSSProperties = {
     borderRadius: 8,
@@ -341,34 +438,73 @@ function DataTableLowRec({ rows }: { rows: LotRow[] }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
-            {COLS_LOWREC.map((c) => (
-              <th key={c} style={thStyle}>
-                {COL_LABEL_LOWREC[c] ?? c}
-              </th>
-            ))}
+            {COLS_LOWREC.map((c) => {
+              if (c === "sel") {
+                return (
+                  <th key={c} style={{ ...thStyle, width: 54 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected && !noneSelected}
+                      ref={(el) => {
+                        if (!el) return;
+                        el.indeterminate = !allSelected && !noneSelected;
+                      }}
+                      onChange={(e) => onSetMany(keys, e.target.checked)}
+                      title="Seleccionar/Deseleccionar todos"
+                      style={{ width: 16, height: 16, cursor: "pointer" }}
+                    />
+                  </th>
+                );
+              }
+              return (
+                <th key={c} style={thStyle}>
+                  {COL_LABEL_LOWREC[c] ?? c}
+                </th>
+              );
+            })}
           </tr>
         </thead>
 
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-              <td style={tdStyle}>{i + 1}</td>
-              <td style={tdStyle}>{r.codigo ?? ""}</td>
-              <td style={tdStyle}>{r.zona ?? ""}</td>
-              <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
-              <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
-              <td style={tdStyle}>{fmt(r.tms, 2)}</td>
-              <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
-              <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
-              <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
-              <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
-              <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
-              <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
-              <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
-              <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
-              <td style={tdStyle}>{r.rec_class ?? ""}</td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const k = r._k || `${i}`;
+            const isSel = selected[k] !== false;
+            return (
+              <tr
+                key={k}
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,.08)",
+                  opacity: isSel ? 1 : 0.45,
+                }}
+              >
+                <td style={tdStyle}>
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => onToggle(k)}
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                    title="Incluir en export/sumas"
+                  />
+                </td>
+
+                <td style={tdStyle}>{i + 1}</td>
+                <td style={tdStyle}>{r.codigo ?? ""}</td>
+                <td style={tdStyle}>{r.zona ?? ""}</td>
+                <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
+                <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.tms, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
+                <td style={tdStyle}>{r.rec_class ?? ""}</td>
+              </tr>
+            );
+          })}
 
           {rows.length === 0 && (
             <tr>
@@ -383,8 +519,11 @@ function DataTableLowRec({ rows }: { rows: LotRow[] }) {
           <tfoot>
             <tr>
               <td style={tfootTd} />
+              <td style={tfootTd} />
               <td style={tfootTd}>SUBTOTAL</td>
-              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>
+                ({selectedCount} sel / {allCount})
+              </td>
 
               <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
               <td style={tfootTd}>{fmt(humW, 2)}</td>
@@ -409,8 +548,6 @@ function DataTableLowRec({ rows }: { rows: LotRow[] }) {
     </div>
   );
 }
-
-type ViewKey = "1" | "2" | "3" | "4";
 
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
@@ -773,7 +910,6 @@ function groupLowRecByClass(rows: LotRow[]) {
     map.get(k)!.push(r);
   }
 
-  // Orden: intenta mantener un orden "lógico" si existe, si no alfabético
   const preferred = ["CRÍTICA", "CRITICA", "ALTA", "MEDIA", "BAJA", "SIN CLASIFICACIÓN"];
   const keys = Array.from(map.keys());
   keys.sort((a, b) => {
@@ -790,7 +926,6 @@ function groupLowRecByClass(rows: LotRow[]) {
 
 // ====== EXCEL helpers ======
 function sanitizeSheetName(name: string) {
-  // Excel limita a 31 chars y prohíbe: : \ / ? * [ ]
   const cleaned = (name ?? "")
     .replace(/[:\\\/\?\*\[\]]/g, " ")
     .replace(/\s+/g, " ")
@@ -806,6 +941,26 @@ function aoaToSheet(aoa: any[][]) {
   return XLSX.utils.aoa_to_sheet(aoa);
 }
 
+function buildSelectedMapAllTrue(rows: LotRow[]) {
+  const m: SelectedMap = {};
+  for (const r of rows) {
+    if (r._k) m[r._k] = true;
+  }
+  return m;
+}
+
+function addKeysToRows(view: ViewKey, rows: LotRow[]) {
+  return (rows ?? []).map((r, idx) => {
+    const idPart = r.id != null ? `id:${r.id}` : `i:${idx}`;
+    const pilePart = `${r.pile_code ?? 0}_${(r.pile_type ?? "varios") as string}`;
+    const codePart = `${r.codigo ?? ""}`;
+    const zonePart = `${r.zona ?? ""}`;
+    const dtPart = `${r.loaded_at ?? r.created_at ?? ""}`;
+    const key = `${view}|${pilePart}|${codePart}|${zonePart}|${dtPart}|${idPart}`;
+    return { ...r, _k: key };
+  });
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -817,7 +972,15 @@ export default function Home() {
   const [r1, setR1] = useState<LotRow[]>([]);
   const [r2, setR2] = useState<LotRow[]>([]);
   const [r3, setR3] = useState<LotRow[]>([]);
-  const [r4, setR4] = useState<LotRow[]>([]); // ✅ baja recuperación
+  const [r4, setR4] = useState<LotRow[]>([]);
+
+  // ✅ selection per view (default all true, can deselect)
+  const [sel, setSel] = useState<Record<ViewKey, SelectedMap>>({
+    "1": {},
+    "2": {},
+    "3": {},
+    "4": {},
+  });
 
   const [view, setView] = useState<ViewKey>("1");
 
@@ -836,7 +999,7 @@ export default function Home() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [calcMsg, setCalcMsg] = useState<string>("");
 
-  // ✅ export state (separado)
+  // ✅ export state
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
   const [exportExcelLoading, setExportExcelLoading] = useState(false);
 
@@ -868,6 +1031,22 @@ export default function Home() {
     setInput("");
     setError("");
   };
+
+  function toggleRowSelection(viewKey: ViewKey, rowKey: string) {
+    setSel((prev) => {
+      const cur = prev[viewKey] ?? {};
+      const nextVal = cur[rowKey] === false ? true : false; // default true -> false
+      return { ...prev, [viewKey]: { ...cur, [rowKey]: nextVal } };
+    });
+  }
+
+  function setManySelection(viewKey: ViewKey, rowKeys: string[], value: boolean) {
+    setSel((prev) => {
+      const cur = { ...(prev[viewKey] ?? {}) };
+      for (const k of rowKeys) cur[k] = value;
+      return { ...prev, [viewKey]: cur };
+    });
+  }
 
   async function loadZones() {
     setZonesLoading(true);
@@ -923,7 +1102,6 @@ export default function Home() {
     setLoadError("");
 
     try {
-      // 1) Siempre intenta cargar 1..3 (críticos)
       const [a, b, c] = await Promise.all([
         fetch("/api/pilas?which=1", { cache: "no-store" }),
         fetch("/api/pilas?which=2", { cache: "no-store" }),
@@ -938,29 +1116,45 @@ export default function Home() {
       if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
       if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
 
-      setR1(Array.isArray(ja?.rows) ? ja.rows : []);
-      setR2(Array.isArray(jb?.rows) ? jb.rows : []);
-      setR3(Array.isArray(jc?.rows) ? jc.rows : []);
+      const rows1 = addKeysToRows("1", Array.isArray(ja?.rows) ? ja.rows : []);
+      const rows2 = addKeysToRows("2", Array.isArray(jb?.rows) ? jb.rows : []);
+      const rows3 = addKeysToRows("3", Array.isArray(jc?.rows) ? jc.rows : []);
 
-      // 2) Resultado 4 (NO crítico): si falla, NO borres los otros
+      setR1(rows1);
+      setR2(rows2);
+      setR3(rows3);
+
+      // ✅ reset selección a "todo seleccionado" cuando recargas
+      setSel((prev) => ({
+        ...prev,
+        "1": buildSelectedMapAllTrue(rows1),
+        "2": buildSelectedMapAllTrue(rows2),
+        "3": buildSelectedMapAllTrue(rows3),
+      }));
+
+      // Resultado 4 (NO crítico)
       try {
         const d = await fetch("/api/pilas?which=4", { cache: "no-store" });
         const jd = await d.json().catch(() => ({}));
         if (!d.ok) {
           setR4([]);
+          setSel((prev) => ({ ...prev, "4": {} }));
         } else {
-          setR4(Array.isArray(jd?.rows) ? jd.rows : []);
+          const rows4 = addKeysToRows("4", Array.isArray(jd?.rows) ? jd.rows : []);
+          setR4(rows4);
+          setSel((prev) => ({ ...prev, "4": buildSelectedMapAllTrue(rows4) }));
         }
       } catch {
         setR4([]);
+        setSel((prev) => ({ ...prev, "4": {} }));
       }
     } catch (e: any) {
-      // Si falla 1..3 recién ahí sí es crítico
       setLoadError(e?.message || "Error");
       setR1([]);
       setR2([]);
       setR3([]);
       setR4([]);
+      setSel({ "1": {}, "2": {}, "3": {}, "4": {} });
     } finally {
       setLoading(false);
     }
@@ -1031,14 +1225,14 @@ export default function Home() {
   const g2 = useMemo(() => groupByPile(r2), [r2]);
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
-  // ✅ Baja recuperación agrupada por clasificación (para web)
+  // ✅ Baja recuperación agrupada por clasificación (para web) - pero usando SOLO seleccionados para KPIs/footers
   const lowRecGroups = useMemo(() => {
-  return groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
+    return groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
   }, [r4]);
-
 
   const current = view === "1" ? g1 : view === "2" ? g2 : view === "3" ? g3 : [];
   const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : view === "3" ? r3 : r4;
+  const flatSelectedRows = useMemo(() => filterSelected(flatCurrentRows, sel[view] ?? {}), [flatCurrentRows, sel, view]);
 
   const viewTitle =
     view === "1"
@@ -1121,10 +1315,10 @@ export default function Home() {
     doc.setFontSize(11);
     doc.text(title, marginX, headerH + 22);
 
-    const head = [COLS_LOWREC.map((c) => COL_LABEL_LOWREC[c as ColKeyLow] ?? c)];
+    const head = [COLS_LOWREC.filter((c) => c !== "sel").map((c) => COL_LABEL_LOWREC[c as ColKeyLow] ?? c)];
 
     const body = rows.map((r, i) => [
-      String(i + 1), // ✅ enumeración reinicia desde 1
+      String(i + 1),
       r.codigo ?? "",
       r.zona ?? "",
       fmt(r.tmh, 2),
@@ -1150,7 +1344,7 @@ export default function Home() {
         [
           "",
           "SUBTOTAL",
-          `(${rows.length} lotes)`,
+          `(${rows.length} sel)`,
           fmt(tot.tmhSum, 2),
           fmt(tot.humW, 2),
           fmt(tot.tmsSum, 2),
@@ -1203,14 +1397,19 @@ export default function Home() {
     });
   }
 
-  // ✅ EXPORT PDF (solo la vista seleccionada: 1,2,3 o 4)
+  // ✅ EXPORT PDF (solo seleccionados)
   async function exportCurrentToPDF() {
     setExportPdfLoading(true);
     try {
-      const pileDate = getPileDateFromRows(flatCurrentRows);
+      const selectedNow = filterSelected(flatCurrentRows, sel[view] ?? {});
+      if (!selectedNow || selectedNow.length === 0) {
+        alert("No hay lotes seleccionados para exportar.");
+        return;
+      }
+
+      const pileDate = getPileDateFromRows(selectedNow);
       const dateStr = formatDDMMYYYY(pileDate);
 
-      // logo: public/export_logo.png
       const logoDataUrl = await fetchImageAsDataURL("/export_logo.png").catch(() => "");
       const logoSize = logoDataUrl ? await getImageNaturalSize(logoDataUrl).catch(() => ({ w: 0, h: 0 })) : { w: 0, h: 0 };
 
@@ -1245,19 +1444,15 @@ export default function Home() {
         doc.line(marginX, headerH, pageW - marginX, headerH);
       };
 
-      // ====== Caso: Resultado 4 (TOTAL + tablas por rec_class) ======
+      // ====== Caso: Resultado 4 (TOTAL + por rec_class) SOLO seleccionados ======
       if (view === "4") {
-        if (!r4 || r4.length === 0) {
-          alert("Sin datos para exportar.");
-          return;
-        }
+        const sel4 = selectedNow;
 
-        // 1) Tabla total (como ahora)
         addLowRecTable({
           doc,
           drawHeader,
-          title: "Baja Recuperación (Total)",
-          rows: r4,
+          title: "Baja Recuperación (Seleccionados)",
+          rows: sel4,
           pageW,
           pageH,
           marginX,
@@ -1265,14 +1460,13 @@ export default function Home() {
           addPageBefore: false,
         });
 
-        // 2) Tablas por categoría
-        const groups = groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
+        const groups = groupLowRecByClass(sel4).filter((g) => g.rows.length > 0);
 
         for (const g of groups) {
           addLowRecTable({
             doc,
             drawHeader,
-            title: `Baja Recuperación – ${g.rec_class}`,
+            title: `Baja Recuperación – ${g.rec_class} (Sel)`,
             rows: g.rows,
             pageW,
             pageH,
@@ -1287,14 +1481,14 @@ export default function Home() {
         return;
       }
 
-      // ====== Caso: Resultados 1/2/3 (tablas por pila) ======
+      // ====== Caso: Resultados 1/2/3 (por pila) SOLO seleccionados ======
       const piles = current;
       if (!piles || piles.length === 0) {
         alert("Sin datos para exportar.");
         return;
       }
 
-      const head = [COLS.map((c) => COL_LABEL[c as ColKey] ?? c)];
+      const head = [COLS.filter((c) => c !== "sel").map((c) => COL_LABEL[c as ColKey] ?? c)];
 
       const makeBodyRows = (rows: LotRow[]) =>
         rows.map((r, i) => [
@@ -1314,8 +1508,14 @@ export default function Home() {
           fmt(r.rec_pct, 2),
         ]);
 
-      piles.forEach((p, idx) => {
-        if (idx > 0) doc.addPage();
+      let printedAny = false;
+
+      piles.forEach((p) => {
+        const lotesSel = filterSelected(p.lotes, sel[view] ?? {});
+        if (lotesSel.length === 0) return;
+
+        if (printedAny) doc.addPage();
+        printedAny = true;
 
         drawHeader();
 
@@ -1323,25 +1523,25 @@ export default function Home() {
         doc.setFontSize(11);
         doc.text(`Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
 
-        const k = pileKPIs(p.lotes);
+        const k = pileKPIs(lotesSel);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
         doc.text(
-          `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`,
+          `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}% | Sel=${lotesSel.length}`,
           marginX,
           headerH + 38
         );
 
-        const tot = totalsForExport(p.lotes);
+        const tot = totalsForExport(lotesSel);
 
         autoTable(doc, {
           head,
-          body: makeBodyRows(p.lotes),
+          body: makeBodyRows(lotesSel),
           foot: [
             [
               "",
               "SUBTOTAL",
-              `(${p.lotes.length} lotes)`,
+              `(${lotesSel.length} sel)`,
               fmt(tot.tmhSum, 2),
               fmt(tot.humW, 2),
               fmt(tot.tmsSum, 2),
@@ -1393,6 +1593,11 @@ export default function Home() {
         });
       });
 
+      if (!printedAny) {
+        alert("No hay lotes seleccionados en las pilas para exportar.");
+        return;
+      }
+
       const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
       doc.save(fname);
     } catch (e: any) {
@@ -1402,25 +1607,33 @@ export default function Home() {
     }
   }
 
-  // ✅ EXPORT EXCEL (misma lógica que PDF, sin firmas)
+  // ✅ EXPORT EXCEL (solo seleccionados)
   async function exportCurrentToExcel() {
     setExportExcelLoading(true);
     try {
-      const pileDate = getPileDateFromRows(flatCurrentRows);
+      const selectedNow = filterSelected(flatCurrentRows, sel[view] ?? {});
+      if (!selectedNow || selectedNow.length === 0) {
+        alert("No hay lotes seleccionados para exportar.");
+        return;
+      }
+
+      const pileDate = getPileDateFromRows(selectedNow);
       const dateStr = formatDDMMYYYY(pileDate);
 
       const wb = XLSX.utils.book_new();
 
       const headerRow = (cols: readonly string[], isLow = false) =>
-        cols.map((c) => {
-          if (isLow) return (COL_LABEL_LOWREC as any)[c] ?? c;
-          return (COL_LABEL as any)[c] ?? c;
-        });
+        cols
+          .filter((c) => c !== "sel")
+          .map((c) => {
+            if (isLow) return (COL_LABEL_LOWREC as any)[c] ?? c;
+            return (COL_LABEL as any)[c] ?? c;
+          });
 
       const buildSheetForRows = (params: { title: string; rows: LotRow[]; lowRec?: boolean; kpiText?: string }) => {
         const { title, rows, lowRec, kpiText } = params;
 
-        const cols = lowRec ? (COLS_LOWREC as unknown as string[]) : (COLS as unknown as string[]);
+        const cols = (lowRec ? (COLS_LOWREC as unknown as string[]) : (COLS as unknown as string[])).filter((c) => c !== "sel");
         const head = headerRow(cols as any, !!lowRec);
 
         const aoa: any[][] = [];
@@ -1463,7 +1676,7 @@ export default function Home() {
           const subtotalBase = [
             "",
             "SUBTOTAL",
-            `(${rows.length} lotes)`,
+            `(${rows.length} sel)`,
             tot.tmhSum,
             tot.humW,
             tot.tmsSum,
@@ -1483,22 +1696,21 @@ export default function Home() {
 
         const ws = aoaToSheet(aoa);
 
-        // Ancho de columnas (simple)
         const baseCols = [
-          { wch: 6 }, // #
-          { wch: 14 }, // código
-          { wch: 16 }, // zona
-          { wch: 12 }, // TMH
-          { wch: 14 }, // Hum
-          { wch: 12 }, // TMS
-          { wch: 10 }, // Au g/t
-          { wch: 14 }, // Au fino
-          { wch: 10 }, // Ag g/t
-          { wch: 14 }, // Ag fino
-          { wch: 10 }, // Cu
-          { wch: 14 }, // NaCN
-          { wch: 14 }, // NaOH
-          { wch: 10 }, // Rec
+          { wch: 6 },
+          { wch: 14 },
+          { wch: 16 },
+          { wch: 12 },
+          { wch: 14 },
+          { wch: 12 },
+          { wch: 10 },
+          { wch: 14 },
+          { wch: 10 },
+          { wch: 14 },
+          { wch: 10 },
+          { wch: 14 },
+          { wch: 14 },
+          { wch: 10 },
         ];
         const colsW = lowRec ? [...baseCols, { wch: 18 }] : baseCols;
         setColWidths(ws, colsW);
@@ -1506,35 +1718,30 @@ export default function Home() {
         return ws;
       };
 
-      // ====== Caso: Resultado 4 (TOTAL + tablas por rec_class) ======
+      // ====== Caso: Resultado 4 (TOTAL + por rec_class) SOLO seleccionados ======
       if (view === "4") {
-        if (!r4 || r4.length === 0) {
-          alert("Sin datos para exportar.");
-          return;
-        }
+        const sel4 = selectedNow;
 
-        // Total
         XLSX.utils.book_append_sheet(
           wb,
           buildSheetForRows({
-            title: "Baja Recuperación (Total)",
-            rows: r4,
+            title: "Baja Recuperación (Seleccionados)",
+            rows: sel4,
             lowRec: true,
           }),
-          sanitizeSheetName("BajaRec Total")
+          sanitizeSheetName("BajaRec Sel")
         );
 
-        // Por clasificación
-        const groups = groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
+        const groups = groupLowRecByClass(sel4).filter((g) => g.rows.length > 0);
         for (const g of groups) {
           XLSX.utils.book_append_sheet(
             wb,
             buildSheetForRows({
-              title: `Baja Recuperación – ${g.rec_class}`,
+              title: `Baja Recuperación – ${g.rec_class} (Sel)`,
               rows: g.rows,
               lowRec: true,
             }),
-            sanitizeSheetName(`BR ${g.rec_class}`)
+            sanitizeSheetName(`BR Sel ${g.rec_class}`)
           );
         }
 
@@ -1543,28 +1750,39 @@ export default function Home() {
         return;
       }
 
-      // ====== Caso: Resultados 1/2/3 (tablas por pila => 1 hoja por pila) ======
+      // ====== Caso: Resultados 1/2/3 (1 hoja por pila) SOLO seleccionados ======
       const piles = current;
       if (!piles || piles.length === 0) {
         alert("Sin datos para exportar.");
         return;
       }
 
+      let appended = 0;
+
       for (const p of piles) {
-        const k = pileKPIs(p.lotes);
-        const kpiText = `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`;
+        const lotesSel = filterSelected(p.lotes, sel[view] ?? {});
+        if (lotesSel.length === 0) continue;
+
+        const k = pileKPIs(lotesSel);
+        const kpiText = `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}% | Sel=${lotesSel.length}`;
 
         const sheetName = sanitizeSheetName(`Pila ${p.pile_code} ${p.pile_type}`);
         XLSX.utils.book_append_sheet(
           wb,
           buildSheetForRows({
             title: `Pila #${p.pile_code} (${p.pile_type})`,
-            rows: p.lotes,
+            rows: lotesSel,
             lowRec: false,
             kpiText,
           }),
           sheetName
         );
+        appended++;
+      }
+
+      if (appended === 0) {
+        alert("No hay lotes seleccionados en las pilas para exportar.");
+        return;
       }
 
       const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.xlsx`;
@@ -1680,7 +1898,6 @@ export default function Home() {
             {etlLoading ? "Cargando..." : "Cargar lotes"}
           </button>
 
-          {/* ✅ Exportar PDF (antes: Exportar) */}
           <button
             onClick={exportCurrentToPDF}
             disabled={exportPdfLoading}
@@ -1694,12 +1911,11 @@ export default function Home() {
               cursor: exportPdfLoading ? "not-allowed" : "pointer",
               whiteSpace: "nowrap",
             }}
-            title="Exporta SOLO el resultado seleccionado (tab actual) a PDF"
+            title="Exporta SOLO los lotes seleccionados del tab actual a PDF"
           >
             {exportPdfLoading ? "Exportando..." : "Exportar PDF"}
           </button>
 
-          {/* ✅ NUEVO: Exportar Excel */}
           <button
             onClick={exportCurrentToExcel}
             disabled={exportExcelLoading}
@@ -1713,7 +1929,7 @@ export default function Home() {
               cursor: exportExcelLoading ? "not-allowed" : "pointer",
               whiteSpace: "nowrap",
             }}
-            title="Exporta SOLO el resultado seleccionado (tab actual) a Excel"
+            title="Exporta SOLO los lotes seleccionados del tab actual a Excel"
           >
             {exportExcelLoading ? "Exportando..." : "Exportar Excel"}
           </button>
@@ -1808,9 +2024,7 @@ export default function Home() {
             </button>
 
             {calcMsg && (
-              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>
-                {calcMsg}
-              </span>
+              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>
             )}
 
             <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Si dejas vacío, usa el default.</span>
@@ -1820,7 +2034,6 @@ export default function Home() {
         <div style={{ height: 10 }} />
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-          {/* ✅ PRIMERO: selector de ZONAS */}
           <ZoneDropdown zones={zonesAll} selected={zonesSelected} onToggle={toggleZone} onSelectAll={selectAllZones} />
 
           <InputRow label="TMS mínimo de Lote" value={lot_tms_min} onChange={setLotTmsMin} placeholder={`${DEFAULTS.lot_tms_min}`} hint="0 = no filtra" />
@@ -1863,55 +2076,72 @@ export default function Home() {
       <section style={{ marginBottom: 22 }}>
         <h2 style={{ margin: "0 0 10px 0" }}>{viewTitle}</h2>
 
-        {/* ✅ Resultado 4 */}
-{view === "4" && (
-  <>
-    {/* TOTAL */}
-    <div
-      style={{
-        marginBottom: 14,
-        background: "#004F86",
-        padding: 12,
-        borderRadius: 10,
-        border: "1px solid rgba(255,255,255,.12)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-        <b>Baja Recuperación (Total)</b>
-        <span style={{ color: "rgba(255,255,255,.85)" }}>({r4.length} lotes)</span>
-      </div>
-
-      <DataTableLowRec rows={r4} />
-    </div>
-
-    {/* POR CLASIFICACIÓN */}
-    {lowRecGroups.map((g) => (
-      <div
-        key={`lowrec-${g.rec_class}`}
-        style={{
-          marginBottom: 14,
-          background: "#004F86",
-          padding: 12,
-          borderRadius: 10,
-          border: "1px solid rgba(255,255,255,.12)",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-          <b>Baja Recuperación – {g.rec_class}</b>
-          <span style={{ color: "rgba(255,255,255,.85)" }}>({g.rows.length} lotes)</span>
+        <div style={{ marginBottom: 10, fontSize: 12, color: "rgba(255,255,255,.80)" }}>
+          Seleccionados en este tab: <b>{flatSelectedRows.length}</b> / {flatCurrentRows.length}
         </div>
 
-        <DataTableLowRec rows={g.rows} />
-      </div>
-    ))}
-  </>
-)}
+        {/* ✅ Resultado 4 */}
+        {view === "4" && (
+          <>
+            {/* TOTAL */}
+            <div
+              style={{
+                marginBottom: 14,
+                background: "#004F86",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid rgba(255,255,255,.12)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                <b>Baja Recuperación (Total)</b>
+                <span style={{ color: "rgba(255,255,255,.85)" }}>({r4.length} lotes)</span>
+              </div>
 
+              <DataTableLowRec
+                rows={r4}
+                selected={sel["4"] ?? {}}
+                onToggle={(k) => toggleRowSelection("4", k)}
+                onSetMany={(keys, v) => setManySelection("4", keys, v)}
+              />
+            </div>
+
+            {/* POR CLASIFICACIÓN */}
+            {lowRecGroups.map((g) => (
+              <div
+                key={`lowrec-${g.rec_class}`}
+                style={{
+                  marginBottom: 14,
+                  background: "#004F86",
+                  padding: 12,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,.12)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                  <b>Baja Recuperación – {g.rec_class}</b>
+                  <span style={{ color: "rgba(255,255,255,.85)" }}>({g.rows.length} lotes)</span>
+                </div>
+
+                <DataTableLowRec
+                  rows={g.rows}
+                  selected={sel["4"] ?? {}}
+                  onToggle={(k) => toggleRowSelection("4", k)}
+                  onSetMany={(keys, v) => setManySelection("4", keys, v)}
+                />
+              </div>
+            ))}
+          </>
+        )}
 
         {/* ✅ Resultados 1/2/3 */}
         {view !== "4" &&
           current.map(({ pile_code, pile_type, lotes }) => {
-            const k = pileKPIs(lotes);
+            const lotesSel = filterSelected(lotes, sel[view] ?? {});
+            const k = pileKPIs(lotesSel);
+            const total = lotes.length;
+            const selCount = lotesSel.length;
+
             return (
               <div
                 key={`${pile_code}-${pile_type}`}
@@ -1925,7 +2155,7 @@ export default function Home() {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
                   <b>
-                    Pila #{pile_code} ({pile_type})
+                    Pila #{pile_code} ({pile_type}) — Sel {selCount}/{total}
                   </b>
 
                   <span style={{ color: "rgba(255,255,255,.85)" }}>
@@ -1933,7 +2163,12 @@ export default function Home() {
                   </span>
                 </div>
 
-                <DataTable rows={lotes} />
+                <DataTable
+                  rows={lotes}
+                  selected={sel[view] ?? {}}
+                  onToggle={(k) => toggleRowSelection(view, k)}
+                  onSetMany={(keys, v) => setManySelection(view, keys, v)}
+                />
               </div>
             );
           })}

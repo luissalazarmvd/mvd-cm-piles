@@ -646,7 +646,7 @@ function pad2(x: number) {
 }
 
 function formatDDMMYYYY(d: Date) {
-  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
 }
 
 function safeParseDate(s?: string) {
@@ -972,7 +972,7 @@ export default function Home() {
 
       const ins = j?.inserted;
       if (ins) {
-        setCalcMsg(`OK: p1=${ins?.p1 ?? 0}, p2=${ins?.p2 ?? 0}, p3=${ins?.p3 ?? 0}, baja_rec=${ins?.rej_lowrec ?? ins?.p4 ?? 0}`);
+        setCalcMsg(`OK: R1=${ins?.p1 ?? 0}, R2=${ins?.p2 ?? 0}, R3=${ins?.p3 ?? 0}, BR=${ins?.rej_lowrec ?? ins?.p4 ?? 0}`);
       } else {
         setCalcMsg("OK");
       }

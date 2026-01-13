@@ -22,7 +22,6 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const which = searchParams.get("which");
 
-  // ✅ ahora acepta 1..4
   if (!which || !["1", "2", "3", "4"].includes(which)) {
     return NextResponse.json({ error: "which debe ser 1, 2, 3 o 4" }, { status: 400 });
   }
@@ -43,12 +42,20 @@ export async function GET(req: Request) {
   try {
     const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-    // ✅ Resultado 4 no necesariamente tiene pile_code (o puede ser null)
-    // Entonces: orden condicional
-    let q = supabase.from(table).select("*").order("id", { ascending: true });
+    // ✅ Query base
+    let q = supabase.from(table).select("*");
 
+    // ✅ Resultados 1/2/3: tienen pile_code + id
     if (which !== "4") {
-      q = supabase.from(table).select("*").order("pile_code", { ascending: true }).order("id", { ascending: true });
+      q = q.order("pile_code", { ascending: true }).order("id", { ascending: true });
+    } else {
+      // ✅ Resultado 4: NO tiene id; ordenar por clasificación
+      // (y luego por rec_pct asc para ver los peores primero, opcional)
+      q = q
+        .order("rec_class", { ascending: true, nullsFirst: false })
+        .order("rec_pct", { ascending: true, nullsFirst: false })
+        .order("loaded_at", { ascending: false })
+        .order("codigo", { ascending: true });
     }
 
     const { data, error } = await q;

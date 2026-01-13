@@ -185,9 +185,69 @@ function DataTable({
   onToggle: (rowKey: string) => void;
   onSetMany: (rowKeys: string[], value: boolean) => void;
 }) {
+  type SortDir = "asc" | "desc";
+  const [sort, setSort] = useState<{ key: ColKey; dir: SortDir } | null>(null);
+
+  const NUM_COLS = useMemo(
+    () =>
+      new Set<ColKey>([
+        "tmh",
+        "humedad_pct",
+        "tms",
+        "au_gr_ton",
+        "au_fino",
+        "ag_gr_ton",
+        "ag_fino",
+        "cu_pct",
+        "nacn_kg_t",
+        "naoh_kg_t",
+        "rec_pct",
+      ]),
+    []
+  );
+
   const keys = useMemo(() => rows.map((r) => r._k).filter(Boolean) as string[], [rows]);
 
-  const selectedRows = useMemo(() => filterSelected(rows, selected), [rows, selected]);
+  const toggleSort = (c: ColKey) => {
+    if (c === "sel" || c === "nro") return; // nro siempre 1..n (no ordenar por #)
+    setSort((prev) => {
+      if (!prev || prev.key !== c) return { key: c, dir: "asc" };
+      return { key: c, dir: prev.dir === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+
+    const { key, dir } = sort;
+    const factor = dir === "asc" ? 1 : -1;
+
+    const withIdx = rows.map((r, idx) => ({ r, idx }));
+
+    const cmp = (a: LotRow, b: LotRow) => {
+      if (NUM_COLS.has(key)) {
+        const va = n((a as any)[key]);
+        const vb = n((b as any)[key]);
+        if (va === vb) return 0;
+        return va < vb ? -1 : 1;
+      }
+
+      const sa = String(((a as any)[key] ?? "")).toLowerCase();
+      const sb = String(((b as any)[key] ?? "")).toLowerCase();
+      if (sa === sb) return 0;
+      return sa.localeCompare(sb, "es");
+    };
+
+    withIdx.sort((A, B) => {
+      const main = cmp(A.r, B.r) * factor;
+      if (main !== 0) return main;
+      return A.idx - B.idx; // estable
+    });
+
+    return withIdx.map((x) => x.r);
+  }, [rows, sort, NUM_COLS]);
+
+  const selectedRows = useMemo(() => filterSelected(sortedRows, selected), [sortedRows, selected]);
 
   const selectedCount = selectedRows.length;
   const allCount = rows.length;
@@ -247,6 +307,11 @@ function DataTable({
     borderTop: "1px solid rgba(255,255,255,.25)",
   };
 
+  const sortMark = (c: ColKey) => {
+    if (!sort || sort.key !== c) return "";
+    return sort.dir === "asc" ? " ▲" : " ▼";
+  };
+
   return (
     <div style={wrapStyle}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -270,9 +335,21 @@ function DataTable({
                   </th>
                 );
               }
+
+              const sortable = c !== "nro";
               return (
-                <th key={c} style={thStyle}>
+                <th
+                  key={c}
+                  style={{
+                    ...thStyle,
+                    cursor: sortable ? "pointer" : "default",
+                    userSelect: "none",
+                  }}
+                  onClick={() => sortable && toggleSort(c)}
+                  title={sortable ? "Ordenar" : ""}
+                >
                   {COL_LABEL[c] ?? c}
+                  {sortable ? sortMark(c) : ""}
                 </th>
               );
             })}
@@ -280,7 +357,7 @@ function DataTable({
         </thead>
 
         <tbody>
-          {rows.map((r, i) => {
+          {sortedRows.map((r, i) => {
             const k = r._k || `${i}`;
             const isSel = selected[k] !== false; // default true
             return (
@@ -301,7 +378,9 @@ function DataTable({
                   />
                 </td>
 
+                {/* ✅ # siempre 1..n según el orden actual */}
                 <td style={tdStyle}>{i + 1}</td>
+
                 <td style={tdStyle}>{r.codigo ?? ""}</td>
                 <td style={tdStyle}>{r.zona ?? ""}</td>
                 <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
@@ -360,6 +439,7 @@ function DataTable({
   );
 }
 
+
 function DataTableLowRec({
   rows,
   selected,
@@ -371,9 +451,69 @@ function DataTableLowRec({
   onToggle: (rowKey: string) => void;
   onSetMany: (rowKeys: string[], value: boolean) => void;
 }) {
+  type SortDir = "asc" | "desc";
+  const [sort, setSort] = useState<{ key: ColKeyLow; dir: SortDir } | null>(null);
+
+  const NUM_COLS = useMemo(
+    () =>
+      new Set<ColKeyLow>([
+        "tmh",
+        "humedad_pct",
+        "tms",
+        "au_gr_ton",
+        "au_fino",
+        "ag_gr_ton",
+        "ag_fino",
+        "cu_pct",
+        "nacn_kg_t",
+        "naoh_kg_t",
+        "rec_pct",
+      ]),
+    []
+  );
+
   const keys = useMemo(() => rows.map((r) => r._k).filter(Boolean) as string[], [rows]);
 
-  const selectedRows = useMemo(() => filterSelected(rows, selected), [rows, selected]);
+  const toggleSort = (c: ColKeyLow) => {
+    if (c === "sel" || c === "nro") return; // nro siempre 1..n
+    setSort((prev) => {
+      if (!prev || prev.key !== c) return { key: c, dir: "asc" };
+      return { key: c, dir: prev.dir === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+
+    const { key, dir } = sort;
+    const factor = dir === "asc" ? 1 : -1;
+
+    const withIdx = rows.map((r, idx) => ({ r, idx }));
+
+    const cmp = (a: LotRow, b: LotRow) => {
+      if (NUM_COLS.has(key)) {
+        const va = n((a as any)[key]);
+        const vb = n((b as any)[key]);
+        if (va === vb) return 0;
+        return va < vb ? -1 : 1;
+      }
+
+      const sa = String(((a as any)[key] ?? "")).toLowerCase();
+      const sb = String(((b as any)[key] ?? "")).toLowerCase();
+      if (sa === sb) return 0;
+      return sa.localeCompare(sb, "es");
+    };
+
+    withIdx.sort((A, B) => {
+      const main = cmp(A.r, B.r) * factor;
+      if (main !== 0) return main;
+      return A.idx - B.idx;
+    });
+
+    return withIdx.map((x) => x.r);
+  }, [rows, sort, NUM_COLS]);
+
+  const selectedRows = useMemo(() => filterSelected(sortedRows, selected), [sortedRows, selected]);
 
   const selectedCount = selectedRows.length;
   const allCount = rows.length;
@@ -433,6 +573,11 @@ function DataTableLowRec({
     borderTop: "1px solid rgba(255,255,255,.25)",
   };
 
+  const sortMark = (c: ColKeyLow) => {
+    if (!sort || sort.key !== c) return "";
+    return sort.dir === "asc" ? " ▲" : " ▼";
+  };
+
   return (
     <div style={wrapStyle}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -456,9 +601,21 @@ function DataTableLowRec({
                   </th>
                 );
               }
+
+              const sortable = c !== "nro";
               return (
-                <th key={c} style={thStyle}>
+                <th
+                  key={c}
+                  style={{
+                    ...thStyle,
+                    cursor: sortable ? "pointer" : "default",
+                    userSelect: "none",
+                  }}
+                  onClick={() => sortable && toggleSort(c)}
+                  title={sortable ? "Ordenar" : ""}
+                >
                   {COL_LABEL_LOWREC[c] ?? c}
+                  {sortable ? sortMark(c) : ""}
                 </th>
               );
             })}
@@ -466,7 +623,7 @@ function DataTableLowRec({
         </thead>
 
         <tbody>
-          {rows.map((r, i) => {
+          {sortedRows.map((r, i) => {
             const k = r._k || `${i}`;
             const isSel = selected[k] !== false;
             return (
@@ -487,7 +644,9 @@ function DataTableLowRec({
                   />
                 </td>
 
+                {/* ✅ # siempre 1..n según el orden actual */}
                 <td style={tdStyle}>{i + 1}</td>
+
                 <td style={tdStyle}>{r.codigo ?? ""}</td>
                 <td style={tdStyle}>{r.zona ?? ""}</td>
                 <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
@@ -548,6 +707,7 @@ function DataTableLowRec({
     </div>
   );
 }
+
 
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {

@@ -1040,7 +1040,7 @@ export default function Home() {
       : view === "2"
       ? "Resultado 2 – Pilas Batch"
       : view === "3"
-      ? "Resultado 3 – Mixto (1 Varios + 1 Batch)"
+      ? "Resultado 3 – Mixto (Varios + Batch)"
       : "Resultado 4 – Baja Recuperación";
 
   const tabBtn = (k: ViewKey, label: string) => {

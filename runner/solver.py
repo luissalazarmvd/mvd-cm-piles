@@ -1412,7 +1412,7 @@ def solve(
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
-    # OUTPUT 3: mix (varios + batch)
+        # OUTPUT 3: mix (varios + batch)
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()
@@ -1421,11 +1421,30 @@ def solve(
         used_codes = set(mix_varios["codigo"].astype(str).tolist())
         rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
 
-    mix_batch = build_batch(rem_mix, params, seed=int(params["seed_mix_batch"])).copy()
-    if not mix_batch.empty:
-        mix_batch["pile_code"] = 2
+    # ✅ antes: solo 1 batch
+    # ✅ ahora: N pilas batch mientras sea posible y queden lotes
+    mix_batch_piles = []
+    seed_mix_base = int(params["seed_mix_batch"])
+
+    pile_code = 2 if not mix_varios.empty else 1
+
+    while True:
+        p = build_batch(rem_mix, params, seed=seed_mix_base + pile_code)
+        if p.empty:
+            break
+
+        p = p.copy()
+        p["pile_code"] = pile_code
+        mix_batch_piles.append(p)
+
+        used_codes = set(p["codigo"].astype(str).tolist())
+        rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+        pile_code += 1
+
+    mix_batch = pd.concat(mix_batch_piles, ignore_index=True) if mix_batch_piles else pd.DataFrame()
 
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
+
 
     # remove used from rejects
     used_all = set()

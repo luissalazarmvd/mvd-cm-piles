@@ -629,6 +629,8 @@ export default function Home() {
   // ✅ export state
   const [exportLoading, setExportLoading] = useState(false);
 
+  const [etlLoading, setEtlLoading] = useState(false);
+
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
@@ -683,6 +685,30 @@ export default function Home() {
       setZonesLoading(false);
     }
   }
+
+  async function runETL() {
+  setEtlLoading(true);
+  try {
+    const res = await fetch("/api/etl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}), // no necesitas params por ahora
+    });
+
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j?.error || "Error ejecutando ETL");
+
+    // refresca el universo / resultados (si quieres que se vea todo actualizado)
+    await loadAll();
+
+    alert(`✅ Lotes cargados: ${j?.inserted ?? "OK"}`);
+  } catch (e: any) {
+    alert(`❌ ${e?.message || "Error"}`);
+  } finally {
+    setEtlLoading(false);
+  }
+}
+
 
   async function loadAll() {
     setLoading(true);
@@ -1075,6 +1101,24 @@ export default function Home() {
           >
             {loading ? "Cargando..." : "Actualizar"}
           </button>
+
+          <button
+    onClick={runETL}
+    disabled={etlLoading}
+    style={{
+      padding: "8px 12px",
+      borderRadius: 8,
+      border: "none",
+      background: "#A7D8FF",
+      color: "#003A63",
+      fontWeight: "bold",
+      cursor: etlLoading ? "not-allowed" : "pointer",
+      whiteSpace: "nowrap",
+    }}
+    title="Carga stg_lotes_daily desde Google Sheets"
+  >
+    {etlLoading ? "Cargando..." : "Cargar lotes"}
+  </button>
 
           <button
             onClick={exportCurrentToPDF}

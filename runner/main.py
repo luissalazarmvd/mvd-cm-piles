@@ -3,13 +3,14 @@ from fastapi import FastAPI, HTTPException, Request
 from supabase import create_client, Client
 import pandas as pd
 import numpy as np
+import math
 
-from solver import solve  # <- solver.py (ya acepta payload opcional)
+from solver import solve  # solver.py (ya acepta payload opcional)
 
 app = FastAPI()
 
 # =========================
-# 0) CONFIG / CONEXIÓN (HARDCODE)
+# 0) CONFIG / CONEXIÓN (HARDCODE)  <-- NO TOCAR LÓGICA
 # =========================
 SUPABASE_URL = "https://iffytelelyatppieocrv.supabase.co"
 SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZnl0ZWxlbHlhdHBwaWVvY3J2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Njc2NTQxMiwiZXhwIjoyMDgyMzQxNDEyfQ.w9NHMxOIh2JUsjL6eMAuH0IMEvudMpYFNFG-s8wzVX8"
@@ -19,6 +20,9 @@ RUNNER_SECRET = "mvdRunnerSecret20260112A7f3c9d1e5b8a0c2f4d6e8a1c3e5b7d9"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# =========================
+# 1) OUTPUTS del solver (igual que antes)
+# =========================
 OUTPUT_COLS = [
     "pile_code", "pile_type",
     "codigo", "zona",
@@ -28,15 +32,40 @@ OUTPUT_COLS = [
     "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
 ]
 
+# =========================
+# 2) ETL (Sheets -> stg_lotes_daily)  <-- NUEVO
+# =========================
+SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTcdo7w_95mj8y1UuknvR5cS7EfCH5yOUl2umOUtFyn-lUlCKr_oJyHoDjkoNcjamJRRlDY0wtBQ5QE/pub?gid=2143480377&single=true&output=csv"
+
+STG_TABLE = "stg_lotes_daily"
+ETL_CHUNK = 500
+
+ETL_COLS = [
+    "codigo", "zona", "tmh", "humedad_pct", "tms",
+    "au_oz_tc", "au_gr_ton", "au_fino",
+    "ag_oz_tc", "ag_gr_ton", "ag_fino",
+    "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+]
+
+ETL_NUM_COLS = [
+    "tmh", "humedad_pct", "tms",
+    "au_oz_tc", "au_gr_ton", "au_fino",
+    "ag_oz_tc", "ag_gr_ton", "ag_fino",
+    "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+]
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
 
 def auth(req: Request):
     if RUNNER_SECRET:
         got = req.headers.get("x-runner-secret", "")
         if got != RUNNER_SECRET:
             raise HTTPException(status_code=401, detail="unauthorized")
+
 
 def _to_native(x):
     if x is None:
@@ -45,12 +74,15 @@ def _to_native(x):
         return x.item()
     return x
 
+
+# -------------------------
+# Helpers SOLVER
+# -------------------------
 def prep_payload(df_out: pd.DataFrame) -> list[dict]:
     if df_out is None or df_out.empty:
         return []
     d = df_out.copy()
 
-    # asegura columnas
     for c in OUTPUT_COLS:
         if c not in d.columns:
             d[c] = None
@@ -60,8 +92,10 @@ def prep_payload(df_out: pd.DataFrame) -> list[dict]:
     payload = [{k: _to_native(v) for k, v in row.items()} for row in payload]
     return payload
 
+
 def delete_all(table_name: str):
     supabase.table(table_name).delete().neq("id", -1).execute()
+
 
 def insert_chunks(table_name: str, payload: list[dict], chunk_size: int = 500) -> int:
     if not payload:
@@ -72,6 +106,124 @@ def insert_chunks(table_name: str, payload: list[dict], chunk_size: int = 500) -
         resp = supabase.table(table_name).insert(chunk).execute()
         total += len(resp.data or [])
     return total
+
+
+# -------------------------
+# Helpers ETL
+# -------------------------
+def json_safe(v):
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return float(v)
+
+    if isinstance(v, (np.floating,)):
+        if np.isnan(v) or np.isinf(v):
+            return None
+        return float(v)
+
+    if isinstance(v, (np.integer,)):
+        return int(v)
+
+    return v
+
+
+def parse_num(v):
+    """
+    Convierte strings con coma decimal y/o separadores de miles a float.
+    Ej:
+      "12,34" -> 12.34
+      "1.234,56" -> 1234.56
+      "1,234.56" -> 1234.56
+      "" -> NaN
+    """
+    if v is None:
+        return np.nan
+
+    s = str(v).strip()
+    if s == "" or s.lower() == "nan":
+        return np.nan
+
+    s = s.replace("%", "").replace(" ", "")
+
+    # Caso europeo: 1.234,56
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+
+    # Solo coma: 1234,56
+    elif "," in s and "." not in s:
+        s = s.replace(",", ".")
+
+    return pd.to_numeric(s, errors="coerce")
+
+
+def run_etl_from_sheets() -> dict:
+    # 1) Leer CSV (todo string)
+    df = pd.read_csv(SHEETS_CSV_URL, dtype=str)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    missing = [c for c in ETL_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas en Sheets: {missing}")
+
+    df = df[ETL_COLS].copy()
+
+    # 2) Parse numérico robusto
+    for c in ETL_NUM_COLS:
+        df[c] = df[c].map(parse_num)
+
+    # 3) Limpieza mínima
+    df["codigo"] = df["codigo"].astype(str).str.strip()
+    df["zona"] = df["zona"].astype(str).str.strip()
+    df = df[df["codigo"].notna() & (df["codigo"] != "")].copy()
+
+    # 4) JSON-safe records
+    records = [{k: json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
+
+    # 5) Borrar staging completo (MVP)
+    #    (misma lógica que tu script: usa loaded_at como filtro)
+    supabase.table(STG_TABLE).delete().gte("loaded_at", "1900-01-01T00:00:00Z").execute()
+
+    # 6) Insert por chunks
+    inserted = 0
+    for i in range(0, len(records), ETL_CHUNK):
+        batch = records[i:i + ETL_CHUNK]
+        resp = supabase.table(STG_TABLE).insert(batch).execute()
+        inserted += len(resp.data or [])
+
+    return {"rows_read": int(len(df)), "rows_inserted": int(inserted)}
+
+
+# =========================
+# ENDPOINTS
+# =========================
+@app.post("/etl")
+async def etl(req: Request):
+    auth(req)
+
+    # payload opcional (por si luego quieres flags). Hoy no se usa.
+    try:
+        _ = await req.json()
+    except:
+        pass
+
+    try:
+        info = run_etl_from_sheets()
+        return {"ok": True, **info}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 @app.post("/run")
 async def run(req: Request):
@@ -114,5 +266,5 @@ async def run(req: Request):
     return {
         "ok": True,
         "inserted": {"p1": ins1, "p2": ins2, "p3": ins3},
-        "payload_used": payload,  # te sirve para debug (si no quieres, bórralo)
+        "payload_used": payload,  # debug
     }

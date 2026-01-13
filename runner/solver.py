@@ -1371,6 +1371,126 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
     p, _ = _try(eligible, seed)
     return p
 
+def build_batch_with_limits(
+    lots: pd.DataFrame,
+    params: Dict[str, Any],
+    seed: int,
+    *,
+    tms_max: float,
+    tms_target: float,
+    tms_min: float,
+) -> pd.DataFrame:
+    """
+    Igual a build_batch, pero con límites (tms_max/target/min) inyectados.
+    Útil para el Resultado 3: intentar 1 sola pila batch si todo entra.
+    """
+    pile_rec_min = float(params["pile_rec_min"])
+    bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
+
+    eligible = lots.copy()
+    m = (
+        eligible["codigo"].notna()
+        & eligible["tms"].notna()
+        & eligible["au_gr_ton"].notna()
+        & eligible["rec_pct"].notna()
+        & eligible["tmh_eff"].notna()
+        & (eligible["tms"] > 0)
+        & (eligible["tmh_eff"] > 0)
+    )
+    eligible = eligible[m].copy()
+    if eligible.empty:
+        return pd.DataFrame()
+
+    if bat_lot_g_min > 0:
+        eligible = eligible[eligible["au_gr_ton"] >= bat_lot_g_min].copy()
+        if eligible.empty:
+            return pd.DataFrame()
+
+    def _try(eligible_in: pd.DataFrame, seed_in: int) -> Tuple[pd.DataFrame, bool]:
+        if eligible_in is None or eligible_in.empty:
+            return pd.DataFrame(), True
+
+        p = solve_one_pile(
+            lots=eligible_in,
+            pile_type="batch",
+            tms_max=float(tms_max),
+            tms_target=float(tms_target),
+            tms_min=float(tms_min),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            rec_min=pile_rec_min,
+            enforce_reagents=True,
+            reag_min=float(params["reag_min"]),
+            reag_max=float(params["reag_max"]),
+            n_iters=int(params["batch_n_iters_hard"]),
+            max_steps=int(params["batch_max_steps"]),
+            cand_sample=int(params["batch_cand_sample"]),
+            reseeds_per_iter=int(params["batch_reseeds"]),
+            seed=seed_in,
+            pair_topk=int(params["batch_pair_topk"]),
+            pair_pool=int(params["batch_pair_pool"]),
+        )
+        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(tms_min) - 1e-9:
+            return p, True
+
+        p = solve_one_pile(
+            lots=eligible_in,
+            pile_type="batch",
+            tms_max=float(tms_max),
+            tms_target=float(tms_target),
+            tms_min=float(tms_min),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            rec_min=pile_rec_min,
+            enforce_reagents=False,
+            reag_min=float(params["reag_min"]),
+            reag_max=float(params["reag_max"]),
+            n_iters=int(params["batch_n_iters_soft"]),
+            max_steps=int(params["batch_max_steps"]),
+            cand_sample=int(params["batch_cand_sample"]),
+            reseeds_per_iter=int(params["batch_reseeds"]),
+            seed=seed_in + 1000,
+            pair_topk=int(params["batch_pair_topk"]),
+            pair_pool=int(params["batch_pair_pool"]),
+        )
+        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(tms_min) - 1e-9:
+            return p, False
+
+        return pd.DataFrame(), True
+
+    # misma lógica de preferencia por rec "mejor"
+    pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
+    eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
+
+    p, enf_used = _try(eligible_pref, seed)
+    if not p.empty:
+        pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
+        p = top_up_pile(
+            p, pool_poor,
+            rec_min=pile_rec_min,
+            tms_max=float(tms_max),
+            tms_target=float(tms_target),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            enforce_reagents=bool(enf_used),
+            reag_min=float(params["reag_min"]),
+            reag_max=float(params["reag_max"]),
+        )
+        return p
+
+    eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
+    p, _ = _try(eligible_hi, seed)
+    if not p.empty:
+        return p
+
+    p, _ = _try(eligible, seed)
+    return p
 
 # =========================
 # SOLVE
@@ -1412,7 +1532,7 @@ def solve(
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
-        # OUTPUT 3: mix (varios + batch)
+            # OUTPUT 3: mix (varios + batch)
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()
@@ -1421,28 +1541,55 @@ def solve(
         used_codes = set(mix_varios["codigo"].astype(str).tolist())
         rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
 
-    # ✅ antes: solo 1 batch
-    # ✅ ahora: N pilas batch mientras sea posible y queden lotes
-    mix_batch_piles = []
     seed_mix_base = int(params["seed_mix_batch"])
-
     pile_code = 2 if not mix_varios.empty else 1
 
-    while True:
-        p = build_batch(rem_mix, params, seed=seed_mix_base + pile_code)
-        if p.empty:
-            break
+    # === NUEVO: intenta 1 sola pila batch si "entra" en una ===
+    mix_batch_piles = []
 
-        p = p.copy()
-        p["pile_code"] = pile_code
-        mix_batch_piles.append(p)
+    if rem_mix is not None and not rem_mix.empty:
+        total_tms = float(pd.to_numeric(rem_mix["tms"], errors="coerce").fillna(0).sum())
 
-        used_codes = set(p["codigo"].astype(str).tolist())
-        rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
-        pile_code += 1
+        # si todo entra en una sola, sube el max SOLO para este intento (capado por var_tms_max)
+        big_max = min(float(params["var_tms_max"]), max(float(params["bat_tms_max"]), total_tms))
+        big_target = min(big_max, total_tms)
+
+        # asegura factibilidad (si target < bat_tms_min, baja el min a target)
+        big_min = min(float(params["bat_tms_min"]), big_target)
+
+        p_big = build_batch_with_limits(
+            rem_mix, params, seed=seed_mix_base + 999,
+            tms_max=big_max, tms_target=big_target, tms_min=big_min
+        )
+
+        if p_big is not None and not p_big.empty:
+            m_big = metrics(p_big, pile_rec_min=float(params["pile_rec_min"]))
+            # acepta "1 sola" si captura casi todo lo que había (98%+)
+            if total_tms > 0 and (m_big["tms"] >= 0.98 * min(total_tms, big_max)):
+                p_big = p_big.copy()
+                p_big["pile_code"] = pile_code
+                mix_batch_piles.append(p_big)
+
+                used_codes = set(p_big["codigo"].astype(str).tolist())
+                rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+                pile_code += 1
+
+    # === fallback: si NO se pudo hacer 1 sola, usa tu lógica N pilas batch normal ===
+    if not mix_batch_piles:
+        while True:
+            p = build_batch(rem_mix, params, seed=seed_mix_base + pile_code)
+            if p.empty:
+                break
+
+            p = p.copy()
+            p["pile_code"] = pile_code
+            mix_batch_piles.append(p)
+
+            used_codes = set(p["codigo"].astype(str).tolist())
+            rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+            pile_code += 1
 
     mix_batch = pd.concat(mix_batch_piles, ignore_index=True) if mix_batch_piles else pd.DataFrame()
-
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
 
 

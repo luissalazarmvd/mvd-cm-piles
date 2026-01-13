@@ -49,9 +49,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
 def _to_float(x: Any, default: float) -> float:
     try:
         v = float(x)
-        if math.isfinite(v):
-            return v
-        return default
+        return v if math.isfinite(v) else default
     except:
         return default
 
@@ -111,8 +109,7 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
 
 def _normalize_zone_str(x: Any) -> str:
     try:
-        s = str(x).strip()
-        return s
+        return str(x).strip()
     except:
         return ""
 
@@ -120,12 +117,10 @@ def _normalize_zone_str(x: Any) -> str:
 def _parse_str_list(x: Any) -> Optional[List[str]]:
     if x is None:
         return None
-
     if isinstance(x, dict):
         return None
 
     out: List[str] = []
-
     if isinstance(x, (list, tuple, set)):
         for it in x:
             s = _normalize_zone_str(it)
@@ -134,8 +129,7 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
     else:
         s = _normalize_zone_str(x)
         if s:
-            parts = [p.strip() for p in s.split(",")]
-            out.extend([p for p in parts if p])
+            out.extend([p for p in (pp.strip() for pp in s.split(",")) if p])
 
     seen = set()
     uniq: List[str] = []
@@ -145,12 +139,11 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
             seen.add(key)
             uniq.append(s)
 
-    return uniq if len(uniq) > 0 else None
+    return uniq if uniq else None
 
 
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     p = dict(DEFAULT_PARAMS)
-
     if not payload or not isinstance(payload, dict):
         return p
 
@@ -184,7 +177,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     if isinstance(payload.get("filters"), dict):
         f = payload["filters"]
-
         if "lot_tmh_min" in f and "lot_tms_min" not in f:
             f["lot_tms_min"] = f.get("lot_tmh_min")
 
@@ -201,7 +193,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     if isinstance(payload.get("varios"), dict):
         v = payload["varios"]
-
         if "var_tmh_max" in v and "var_tms_max" not in v:
             v["var_tms_max"] = v.get("var_tmh_max")
         if "var_tmh_target" in v and "var_tms_target" not in v:
@@ -217,7 +208,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     if isinstance(payload.get("batch"), dict):
         b = payload["batch"]
-
         if "bat_tmh_max" in b and "bat_tms_max" not in b:
             b["bat_tms_max"] = b.get("bat_tmh_max")
         if "bat_tmh_target" in b and "bat_tms_target" not in b:
@@ -264,12 +254,12 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if k in sx:
                 p[k] = _to_int(sx.get(k), p[k])
 
+    # sanity
     if p["reag_min"] > p["reag_max"]:
         p["reag_min"], p["reag_max"] = p["reag_max"], p["reag_min"]
 
     if p["var_tms_min"] > p["var_tms_max"]:
         p["var_tms_min"] = p["var_tms_max"]
-
     if p["bat_tms_min"] > p["bat_tms_max"]:
         p["bat_tms_min"] = p["bat_tms_max"]
 
@@ -305,7 +295,7 @@ def _classify_rec_series(rec: pd.Series) -> pd.Series:
 
 
 # =========================
-# PREP / PREPROCESS
+# PREP / PREPROCESS (SPEED: menos apply, cod normalizado 1 vez)
 # =========================
 def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if df is None or df.empty:
@@ -319,18 +309,7 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         last_load = d["loaded_at"].max()
         d = d[d["loaded_at"] == last_load].copy()
 
-    num_cols = [
-        "tmh", "humedad_pct", "tms",
-        "au_oz_tc", "au_gr_ton", "au_fino",
-        "ag_oz_tc", "ag_gr_ton", "ag_fino",
-        "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct"
-    ]
-    cols = [c for c in num_cols if c in d.columns]
-    if cols:
-        d[cols] = d[cols].apply(pd.to_numeric, errors="coerce")
-
-
-    # Ensure columns
+    # Ensure columns early (evita checks repetidos)
     if "zona" not in d.columns:
         d["zona"] = np.nan
     if "tms" not in d.columns:
@@ -339,40 +318,61 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         d["tmh"] = np.nan
     if "humedad_pct" not in d.columns:
         d["humedad_pct"] = np.nan
+    if "nacn_kg_t" not in d.columns:
+        d["nacn_kg_t"] = np.nan
+    if "naoh_kg_t" not in d.columns:
+        d["naoh_kg_t"] = np.nan
+    if "au_fino" not in d.columns:
+        d["au_fino"] = np.nan
+    if "ag_fino" not in d.columns:
+        d["ag_fino"] = np.nan
 
     # Hard required fields
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
+    if d.empty:
+        return pd.DataFrame()
+
+    # Normalize codigo once (SPEED: se usa en solve loops)
+    d["_cod"] = d["codigo"].astype(str)
 
     # Zone filter
     zones_list = _parse_str_list(params.get("zones", None))
-    if zones_list is not None and len(zones_list) > 0:
-        zset = set([str(z).strip().casefold() for z in zones_list if str(z).strip() != ""])
+    if zones_list:
+        zset = {str(z).strip().casefold() for z in zones_list if str(z).strip() != ""}
         d["_zona_norm"] = d["zona"].astype(str).str.strip().str.casefold()
         d = d[d["_zona_norm"].isin(zset)].copy()
         d = d.drop(columns=["_zona_norm"], errors="ignore")
         if d.empty:
             return pd.DataFrame()
 
-    # Compute TMS if missing/bad and TMH+humedad exists
-    d["tmh"] = pd.to_numeric(d["tmh"], errors="coerce")
-    d["tms"] = pd.to_numeric(d["tms"], errors="coerce")
-    d["humedad_pct"] = pd.to_numeric(d["humedad_pct"], errors="coerce")
+    # Numeric casting (SPEED: loop en vez de apply)
+    num_cols = [
+        "tmh", "humedad_pct", "tms",
+        "au_oz_tc", "au_gr_ton", "au_fino",
+        "ag_oz_tc", "ag_gr_ton", "ag_fino",
+        "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+    ]
+    for c in num_cols:
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce")
 
+    # Compute TMS if missing/bad and TMH+humedad exists
     mask_tms_bad = d["tms"].isna() | (d["tms"] <= 0)
     mask_can_calc = d["tmh"].notna() & (d["tmh"] > 0) & d["humedad_pct"].notna()
-    d.loc[mask_tms_bad & mask_can_calc, "tms"] = (
-        d.loc[mask_tms_bad & mask_can_calc, "tmh"] *
-        (1 - d.loc[mask_tms_bad & mask_can_calc, "humedad_pct"] / 100.0)
-    )
+    if (mask_tms_bad & mask_can_calc).any():
+        d.loc[mask_tms_bad & mask_can_calc, "tms"] = (
+            d.loc[mask_tms_bad & mask_can_calc, "tmh"] *
+            (1 - d.loc[mask_tms_bad & mask_can_calc, "humedad_pct"] / 100.0)
+        )
 
     # tmh_eff = tmh if valid else tms
     d["tmh_eff"] = d["tmh"].where(d["tmh"].notna() & (d["tmh"] > 0), d["tms"])
 
     # positive constraints
-    d = d.dropna(subset=["tms"]).copy()
-    d = d[d["tms"] > 0].copy()
-    d = d.dropna(subset=["tmh_eff"]).copy()
-    d = d[d["tmh_eff"] > 0].copy()
+    d = d.dropna(subset=["tms", "tmh_eff"]).copy()
+    d = d[(d["tms"] > 0) & (d["tmh_eff"] > 0)].copy()
+    if d.empty:
+        return pd.DataFrame()
 
     # lot_tms_min filter
     lot_tms_min = float(params.get("lot_tms_min", 0.0) or 0.0)
@@ -381,26 +381,17 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if d.empty:
             return pd.DataFrame()
 
-    # Ensure reag columns
-    if "nacn_kg_t" not in d.columns:
-        d["nacn_kg_t"] = np.nan
-    if "naoh_kg_t" not in d.columns:
-        d["naoh_kg_t"] = np.nan
-
-    # Ensure fines
-    if "au_fino" not in d.columns:
-        d["au_fino"] = np.nan
-    if "ag_fino" not in d.columns:
-        d["ag_fino"] = np.nan
-
+    # Ensure fines (vectorizado)
     mask_auf = d["au_fino"].isna()
-    d.loc[mask_auf, "au_fino"] = d.loc[mask_auf, "au_gr_ton"] * d.loc[mask_auf, "tms"]
+    if mask_auf.any():
+        d.loc[mask_auf, "au_fino"] = d.loc[mask_auf, "au_gr_ton"] * d.loc[mask_auf, "tms"]
 
     mask_agf = d["ag_fino"].isna()
-    if "ag_gr_ton" in d.columns:
-        d.loc[mask_agf, "ag_fino"] = d.loc[mask_agf, "ag_gr_ton"] * d.loc[mask_agf, "tms"]
-    else:
-        d.loc[mask_agf, "ag_fino"] = np.nan
+    if mask_agf.any():
+        if "ag_gr_ton" in d.columns:
+            d.loc[mask_agf, "ag_fino"] = d.loc[mask_agf, "ag_gr_ton"] * d.loc[mask_agf, "tms"]
+        else:
+            d.loc[mask_agf, "ag_fino"] = np.nan
 
     return d
 
@@ -451,26 +442,29 @@ def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFra
 
 
 # =========================
-# METRICS / HELPERS
+# METRICS / HELPERS (SPEED: asume numeric ya limpio)
 # =========================
 def wavg(values: pd.Series, weights: pd.Series) -> float:
-    w = pd.to_numeric(weights, errors="coerce").fillna(0).astype(float)
-    v = pd.to_numeric(values, errors="coerce").fillna(0).astype(float)
+    w = weights.astype(float, copy=False)
     denom = float(w.sum())
-    return float((v * w).sum() / denom) if denom > 0 else float("nan")
+    if denom <= 0:
+        return float("nan")
+    v = values.astype(float, copy=False)
+    return float((v * w).sum() / denom)
 
 
 def metrics(d: pd.DataFrame, pile_rec_min: float) -> dict:
-    w = d["tms"].where(d["tms"].notna() & (d["tms"] > 0), d["tmh_eff"])
+    # d viene de preprocess/solver => numeric ya
+    w = d["tms"].where((d["tms"] > 0) & d["tms"].notna(), d["tmh_eff"])
     return {
-        "tmh": float(pd.to_numeric(d["tmh_eff"], errors="coerce").fillna(0).sum()),
-        "tms": float(pd.to_numeric(d["tms"], errors="coerce").fillna(0).sum()),
-        "au_gr_ton": wavg(d["au_gr_ton"], w),
-        "rec_pct": wavg(d["rec_pct"], w),
-        "nacn_kg_t": wavg(d["nacn_kg_t"], w),
-        "naoh_kg_t": wavg(d["naoh_kg_t"], w),
-        "lowrec_tms": float(pd.to_numeric(d.loc[d["rec_pct"] < pile_rec_min, "tms"], errors="coerce").fillna(0).sum()),
-        "au_fino": float(pd.to_numeric(d["au_fino"], errors="coerce").fillna(0).sum()) if "au_fino" in d.columns else float("nan"),
+        "tmh": float(d["tmh_eff"].fillna(0).sum()),
+        "tms": float(d["tms"].fillna(0).sum()),
+        "au_gr_ton": wavg(d["au_gr_ton"].fillna(0), w.fillna(0)),
+        "rec_pct": wavg(d["rec_pct"].fillna(0), w.fillna(0)),
+        "nacn_kg_t": wavg(d["nacn_kg_t"].fillna(0), w.fillna(0)),
+        "naoh_kg_t": wavg(d["naoh_kg_t"].fillna(0), w.fillna(0)),
+        "lowrec_tms": float(d.loc[d["rec_pct"] < pile_rec_min, "tms"].fillna(0).sum()),
+        "au_fino": float(d["au_fino"].fillna(0).sum()) if "au_fino" in d.columns else float("nan"),
     }
 
 
@@ -505,7 +499,7 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
 
 
 # =========================
-# TOP-UP (rellenar pila con lotes más "pobres" sin romper constraints)
+# TOP-UP (SPEED: evita concat por iter, acumula indices)
 # =========================
 def top_up_pile(
     pile: pd.DataFrame,
@@ -526,14 +520,14 @@ def top_up_pile(
         return pile
 
     cur = pile.copy()
-    used = set(cur["codigo"].astype(str).tolist())
+    used = set(cur.get("_cod", cur["codigo"].astype(str)).tolist())
 
     cand = pool.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
     cand = cand[(cand["tms"] > 0) & (cand["tmh_eff"] > 0)].copy()
     if cand.empty:
         return cur
 
-    cand["_cod"] = cand["codigo"].astype(str)
+    cand["_cod"] = cand.get("_cod", cand["codigo"].astype(str))
     cand = cand[~cand["_cod"].isin(used)].copy()
     if cand.empty:
         return cur
@@ -543,29 +537,25 @@ def top_up_pile(
         if cand.empty:
             return cur
 
-    # --- numpy arrays (1 sola vez) ---
-    tms = pd.to_numeric(cand["tms"], errors="coerce").fillna(0).to_numpy(float)
-    g   = pd.to_numeric(cand["au_gr_ton"], errors="coerce").to_numpy(float)
-    r   = pd.to_numeric(cand["rec_pct"], errors="coerce").to_numpy(float)
-    cn  = pd.to_numeric(cand["nacn_kg_t"], errors="coerce").to_numpy(float)
-    oh  = pd.to_numeric(cand["naoh_kg_t"], errors="coerce").to_numpy(float)
+    tms = cand["tms"].to_numpy(float)
+    g   = cand["au_gr_ton"].to_numpy(float)
+    r   = cand["rec_pct"].to_numpy(float)
+    cn  = cand["nacn_kg_t"].to_numpy(float)
+    oh  = cand["naoh_kg_t"].to_numpy(float)
     codes = cand["_cod"].to_numpy(object)
 
     # orden preferente: rec desc, tms desc
     order = np.lexsort((-tms, -r))
 
-    # acumulados actuales (tms, gtms, rtms, cntms, ohtms)
-    cur_tms = float(pd.to_numeric(cur["tms"], errors="coerce").fillna(0).sum())
-    cur_gtms = float((pd.to_numeric(cur["au_gr_ton"], errors="coerce").fillna(0).to_numpy(float) *
-                      pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
-    cur_rtms = float((pd.to_numeric(cur["rec_pct"], errors="coerce").fillna(0).to_numpy(float) *
-                      pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
-    cur_cntms = float((pd.to_numeric(cur["nacn_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
-                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
-    cur_ohtms = float((pd.to_numeric(cur["naoh_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
-                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
+    # acumulados actuales
+    cur_tms = float(cur["tms"].fillna(0).sum())
+    cur_gtms = float((cur["au_gr_ton"].fillna(0).to_numpy(float) * cur["tms"].fillna(0).to_numpy(float)).sum())
+    cur_rtms = float((cur["rec_pct"].fillna(0).to_numpy(float) * cur["tms"].fillna(0).to_numpy(float)).sum())
+    cur_cntms = float((cur["nacn_kg_t"].fillna(0).to_numpy(float) * cur["tms"].fillna(0).to_numpy(float)).sum())
+    cur_ohtms = float((cur["naoh_kg_t"].fillna(0).to_numpy(float) * cur["tms"].fillna(0).to_numpy(float)).sum())
 
     alive = np.ones(len(cand), dtype=bool)
+    picked_idx = []
 
     max_iters = int(len(cand) + 5)
     for _ in range(max_iters):
@@ -578,7 +568,6 @@ def top_up_pile(
         best_j = -1
         best_key = None
 
-        # recorre en orden preferente (rápido)
         for j in order:
             if not alive[j]:
                 continue
@@ -618,9 +607,7 @@ def top_up_pile(
         if best_j < 0:
             break
 
-        # agrega fila sin recomputar todo
-        add = cand.iloc[[best_j]].drop(columns=["_cod"], errors="ignore").copy()
-        cur = pd.concat([cur, add], ignore_index=True)
+        picked_idx.append(best_j)
 
         cur_tms += float(tms[best_j])
         cur_gtms += float(g[best_j] * tms[best_j])
@@ -630,6 +617,10 @@ def top_up_pile(
 
         alive[best_j] = False
         used.add(str(codes[best_j]))
+
+    if picked_idx:
+        add = cand.iloc[picked_idx].copy()
+        cur = pd.concat([cur, add.drop(columns=["_cod"], errors="ignore")], ignore_index=True)
 
     return cur
 
@@ -653,15 +644,13 @@ def build_varios_trim(
         return pd.DataFrame()
 
     d = lots.copy()
-    need_cols = ["codigo", "zona", "tmh_eff", "tms", "au_gr_ton", "rec_pct", "au_fino", "nacn_kg_t", "naoh_kg_t"]
+    need_cols = ["codigo", "zona", "tmh_eff", "tms", "au_gr_ton", "rec_pct", "au_fino", "nacn_kg_t", "naoh_kg_t", "_cod"]
     for c in need_cols:
         if c not in d.columns:
             d[c] = np.nan
 
-    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
-    d = d[d["tms"] > 0].copy()
-    d = d.dropna(subset=["tmh_eff"]).copy()
-    d = d[d["tmh_eff"] > 0].copy()
+    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    d = d[(d["tms"] > 0) & (d["tmh_eff"] > 0)].copy()
     if d.empty:
         return pd.DataFrame()
 
@@ -670,20 +659,17 @@ def build_varios_trim(
         if d.empty:
             return pd.DataFrame()
 
-    d["au_fino"] = pd.to_numeric(d["au_fino"], errors="coerce")
-    mask_auf = d["au_fino"].isna()
-    d.loc[mask_auf, "au_fino"] = (
-        pd.to_numeric(d.loc[mask_auf, "au_gr_ton"], errors="coerce") *
-        pd.to_numeric(d.loc[mask_auf, "tms"], errors="coerce")
-    )
-    d["au_fino"] = d["au_fino"].fillna(0.0)
-
+    # arrays (SPEED)
     tms = d["tms"].to_numpy(float)
     g = d["au_gr_ton"].to_numpy(float)
     r = d["rec_pct"].to_numpy(float)
-    cn = pd.to_numeric(d["nacn_kg_t"], errors="coerce").to_numpy(float)
-    oh = pd.to_numeric(d["naoh_kg_t"], errors="coerce").to_numpy(float)
-    au_fino = d["au_fino"].to_numpy(float)
+    cn = d["nacn_kg_t"].to_numpy(float)
+    oh = d["naoh_kg_t"].to_numpy(float)
+
+    au_fino = d["au_fino"]
+    if au_fino.isna().any():
+        d["au_fino"] = d["au_fino"].fillna(d["au_gr_ton"] * d["tms"])
+    au_fino_arr = d["au_fino"].fillna(0.0).to_numpy(float)
 
     gtms = g * tms
     rtms = r * tms
@@ -696,7 +682,6 @@ def build_varios_trim(
     def compute_penalty(tms_tot, gtms_tot, rtms_tot, cntms_tot, ohtms_tot) -> float:
         if tms_tot <= 0:
             return 1e18
-
         g_avg = gtms_tot / tms_tot
         r_avg = rtms_tot / tms_tot
 
@@ -738,9 +723,6 @@ def build_varios_trim(
         if tms_tot > 0:
             g_avg = gtms_tot / tms_tot
             r_avg = rtms_tot / tms_tot
-            cn_avg = cntms_tot / tms_tot if enforce_reagents else float("nan")
-            oh_avg = ohtms_tot / tms_tot if enforce_reagents else float("nan")
-
             ok = (
                 (tms_tot <= tms_max + 1e-9)
                 and (tms_tot >= tms_min - 1e-9)
@@ -748,13 +730,15 @@ def build_varios_trim(
                 and (r_avg >= rec_min - 1e-9)
             )
             if enforce_reagents:
+                cn_avg = cntms_tot / tms_tot
+                oh_avg = ohtms_tot / tms_tot
                 ok = ok and reag_ok(cn_avg, reag_min, reag_max) and reag_ok(oh_avg, reag_min, reag_max)
 
             if ok:
                 break
 
         idx = np.where(keep)[0]
-        if len(idx) == 0:
+        if idx.size == 0:
             return pd.DataFrame()
 
         new_tms = tms_tot - tms[idx]
@@ -807,14 +791,13 @@ def build_varios_trim(
             + (10.0 * np.abs(tms2 - tms_target))
         )
 
-        fine_loss = au_fino[idx]
+        fine_loss = au_fino_arr[idx]
         tms_loss = tms[idx]
 
         ord_idx = np.lexsort((fine_loss, tms_loss, pen2))
-        pick_pos = int(ord_idx[0])
-        j = int(idx[pick_pos])
+        j = int(idx[int(ord_idx[0])])
 
-        new_pen = float(pen2[pick_pos])
+        new_pen = float(pen2[int(ord_idx[0])])
 
         need_cut = tms_tot > tms_max + 1e-9
         if (not need_cut) and (new_pen >= cur_pen - 1e-6):
@@ -838,11 +821,6 @@ def build_varios_trim(
 
 
 def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    VARIOS con enfoque 2 etapas (REC), pero:
-    - Si el usuario baja pile_rec_min por debajo del default, primero intenta llenar SOLO con lotes
-      que cumplen el default (mejor calidad) y recién luego usa el universo más "pobre".
-    """
     if lots is None or lots.empty:
         return pd.DataFrame()
 
@@ -859,7 +837,6 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         & (eligible["tmh_eff"] > 0)
     )
     eligible = eligible[m].copy()
-
     if eligible.empty:
         return pd.DataFrame()
 
@@ -879,7 +856,7 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
                 gmin=float(gmin),
                 gmax=float(gmax),
                 enforce_reagents=enforce_reagents,
-                rec_min=pile_rec_min,           # constraints = params (pueden ser más "pobres")
+                rec_min=pile_rec_min,
                 tms_max=tms_max,
                 tms_target=tms_target,
                 tms_min=tms_min,
@@ -890,12 +867,11 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
                 return p, float(gmin), float(gmax), enforce_reagents
         return pd.DataFrame(), None, None, enforce_reagents
 
-    # Etapa 0 (PREFERENCIA): SOLO rec >= default_pile_rec_min (siempre empieza con "mejor calidad")
     pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
     eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
+
     p, gmin_used, gmax_used, enf_used = _try(eligible_pref, enforce_reagents=True)
     if not p.empty:
-        # RELLENO: agrega lotes "más pobres" (>= pile_rec_min y < pref_rec) si ayuda a llegar al target
         pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
         p = top_up_pile(
             p, pool_poor,
@@ -930,7 +906,6 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         )
         return p
 
-    # Etapa 1: SOLO rec >= pile_rec_min (params)
     eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
     p, _, _, _ = _try(eligible_hi, enforce_reagents=True)
     if not p.empty:
@@ -939,7 +914,6 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if not p.empty:
         return p
 
-    # Etapa 2: universo completo
     p, _, _, _ = _try(eligible, enforce_reagents=True)
     if not p.empty:
         return p
@@ -951,7 +925,7 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
 
 # =========================
-# SOLVER (BATCH)
+# SOLVER (BATCH) (SPEED: métricas internas por arrays, orden sin sort_values)
 # =========================
 def solve_one_pile(
     lots: pd.DataFrame,
@@ -979,10 +953,8 @@ def solve_one_pile(
         return pd.DataFrame()
 
     d = lots.copy()
-    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
-    d = d[(d["tms"] > 0)].copy()
-    d = d.dropna(subset=["tmh_eff"]).copy()
-    d = d[(d["tmh_eff"] > 0)].copy()
+    d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    d = d[(d["tms"] > 0) & (d["tmh_eff"] > 0)].copy()
     if d.empty:
         return pd.DataFrame()
 
@@ -991,17 +963,13 @@ def solve_one_pile(
         if d.empty:
             return pd.DataFrame()
 
-    d["is_lowrec"] = (d["rec_pct"] < rec_min).astype(int)
-    base = d.sort_values(
-        by=["is_lowrec", "rec_pct", "tms"],
-        ascending=[True, False, False]
-    ).reset_index(drop=True)
-
-    tms_arr = pd.to_numeric(base["tms"], errors="coerce").to_numpy(float)
-    g_arr   = pd.to_numeric(base["au_gr_ton"], errors="coerce").to_numpy(float)
-    r_arr   = pd.to_numeric(base["rec_pct"], errors="coerce").to_numpy(float)
-    cn_arr  = pd.to_numeric(base["nacn_kg_t"], errors="coerce").to_numpy(float)
-    oh_arr  = pd.to_numeric(base["naoh_kg_t"], errors="coerce").to_numpy(float)
+    # arrays base
+    tms_arr = d["tms"].to_numpy(float)
+    g_arr   = d["au_gr_ton"].to_numpy(float)
+    r_arr   = d["rec_pct"].to_numpy(float)
+    cn_arr  = d["nacn_kg_t"].to_numpy(float)
+    oh_arr  = d["naoh_kg_t"].to_numpy(float)
+    tmh_arr = d["tmh_eff"].to_numpy(float)
 
     gtms  = g_arr  * tms_arr
     rtms  = r_arr  * tms_arr
@@ -1010,11 +978,28 @@ def solve_one_pile(
 
     bad_reag = np.isnan(cn_arr) | np.isnan(oh_arr)
 
+    is_lowrec = (r_arr < rec_min).astype(np.int8)
+    order0 = np.lexsort((-tms_arr, -r_arr, is_lowrec))
+    base = d.iloc[order0].reset_index(drop=True)
+
+    # reorder arrays to base order
+    tms_arr = tms_arr[order0]
+    g_arr   = g_arr[order0]
+    r_arr   = r_arr[order0]
+    cn_arr  = cn_arr[order0]
+    oh_arr  = oh_arr[order0]
+    tmh_arr = tmh_arr[order0]
+    gtms    = gtms[order0]
+    rtms    = rtms[order0]
+    cntms   = cntms[order0]
+    ohtms   = ohtms[order0]
+    bad_reag = bad_reag[order0]
+
     n = len(base)
     idx_all = np.arange(n)
     rng = np.random.default_rng(seed)
 
-    best_sol = None
+    best_picked = None
     best_key = None
 
     def grade_pen_vec(new_g: np.ndarray) -> np.ndarray:
@@ -1053,7 +1038,7 @@ def solve_one_pile(
     LAW_BONUS = 8.0
     FINE_BONUS = 0.002
 
-    for _ in range(n_iters):
+    for _ in range(int(n_iters)):
         used = np.zeros(n, dtype=bool)
         picked: list[int] = []
 
@@ -1062,12 +1047,13 @@ def solve_one_pile(
         cur_rtms = 0.0
         cur_cntms = 0.0
         cur_ohtms = 0.0
+        cur_tmh = 0.0
 
         order = rng.permutation(idx_all)
         ptr = 0
-        reseeds_left = reseeds_per_iter
+        reseeds_left = int(reseeds_per_iter)
 
-        for _step in range(max_steps):
+        for _step in range(int(max_steps)):
             if cur_tms >= tms_max - 1e-9:
                 break
 
@@ -1075,7 +1061,7 @@ def solve_one_pile(
             need = max(0.0, min(tms_target, tms_max) - cur_tms)
 
             cand = []
-            while ptr < n and len(cand) < cand_sample:
+            while ptr < n and len(cand) < int(cand_sample):
                 j = int(order[ptr]); ptr += 1
                 if used[j]:
                     continue
@@ -1093,14 +1079,14 @@ def solve_one_pile(
 
             cand_np = np.array(cand, dtype=int)
 
-            if enforce_reagents and bad_reag.any():
+            if enforce_reagents:
+                # ya filtramos dropna, pero por seguridad
                 cand_np = cand_np[~bad_reag[cand_np]]
                 if cand_np.size == 0:
                     continue
 
             add_tms = tms_arr[cand_np]
             new_tms = cur_tms + add_tms
-
             inv = (add_tms <= 0) | (new_tms <= 0)
 
             new_g  = (cur_gtms + gtms[cand_np]) / new_tms
@@ -1136,16 +1122,13 @@ def solve_one_pile(
                 + FINE_BONUS * fine_add
             )
 
-            bad = bad_reag[cand_np]
-            score[bad] = -1e15
             score[inv] = -1e18
-
             best_idx = int(np.argmax(score))
             best_choice = (int(cand_np[best_idx]),)
             best_score = float(score[best_idx])
 
-            k = min(pair_topk, len(cand_np))
-            pool = min(pair_pool, len(cand_np))
+            k = min(int(pair_topk), len(cand_np))
+            pool = min(int(pair_pool), len(cand_np))
 
             if k >= 2 and pool >= 2:
                 topk_idx = np.argpartition(score, -k)[-k:]
@@ -1153,59 +1136,69 @@ def solve_one_pile(
                 partner_pool = cand_np[:pool]
 
                 for j in topk_cands:
+                    tj = tms_arr[j]
                     for kk in partner_pool:
                         if kk == j:
                             continue
-                        if tms_arr[j] + tms_arr[kk] > cap + 1e-9:
+                        if tj + tms_arr[kk] > cap + 1e-9:
+                            continue
+                        if enforce_reagents and (bad_reag[j] or bad_reag[kk]):
                             continue
 
-                        if bad_reag[j] or bad_reag[kk]:
-                            sc = -1e15
+                        add_tms2 = tj + tms_arr[kk]
+                        if add_tms2 <= 0:
+                            continue
+
+                        new_tms2 = cur_tms + add_tms2
+                        new_g2  = (cur_gtms + gtms[j] + gtms[kk]) / new_tms2
+                        new_r2  = (cur_rtms + rtms[j] + rtms[kk]) / new_tms2
+                        new_cn2 = (cur_cntms + cntms[j] + cntms[kk]) / new_tms2
+                        new_oh2 = (cur_ohtms + ohtms[j] + ohtms[kk]) / new_tms2
+
+                        fill2 = min(add_tms2, need)
+
+                        g_pen2 = 0.0
+                        if math.isnan(new_g2):
+                            g_pen2 = 1e6
                         else:
-                            add_tms2 = tms_arr[j] + tms_arr[kk]
-                            if add_tms2 <= 0:
-                                sc = -1e18
+                            if gmin_exclusive:
+                                if new_g2 <= gmin + 1e-9:
+                                    g_pen2 = (gmin - new_g2) + 1e-6
                             else:
-                                new_tms2 = cur_tms + add_tms2
-                                new_g2  = (cur_gtms + gtms[j] + gtms[kk]) / new_tms2
-                                new_r2  = (cur_rtms + rtms[j] + rtms[kk]) / new_tms2
-                                new_cn2 = (cur_cntms + cntms[j] + cntms[kk]) / new_tms2
-                                new_oh2 = (cur_ohtms + ohtms[j] + ohtms[kk]) / new_tms2
+                                if new_g2 < gmin - 1e-9:
+                                    g_pen2 = (gmin - new_g2)
+                            if gmax_inclusive:
+                                if new_g2 > gmax + 1e-9:
+                                    g_pen2 = max(g_pen2, (new_g2 - gmax))
+                            else:
+                                if new_g2 >= gmax - 1e-9:
+                                    g_pen2 = max(g_pen2, (new_g2 - gmax) + 1e-6)
 
-                                fill2 = min(add_tms2, need)
+                        rec_pen2 = max(0.0, rec_min - new_r2)
 
-                                g_pen2 = 0.0
-                                if math.isnan(new_g2):
-                                    g_pen2 = 1e6
-                                else:
-                                    if new_g2 < gmin - 1e-9:
-                                        g_pen2 = (gmin - new_g2)
-                                    if new_g2 > gmax + 1e-9:
-                                        g_pen2 = max(g_pen2, (new_g2 - gmax))
+                        cn_dist2 = dist_to_band_scalar(new_cn2, reag_min, reag_max)
+                        oh_dist2 = dist_to_band_scalar(new_oh2, reag_min, reag_max)
+                        lowrec2 = (1.0 if r_arr[j] < rec_min else 0.0) + (1.0 if r_arr[kk] < rec_min else 0.0)
 
-                                rec_pen2 = max(0.0, rec_min - new_r2)
+                        if enforce_reagents:
+                            if (not reag_ok(new_cn2, reag_min, reag_max)) or (not reag_ok(new_oh2, reag_min, reag_max)):
+                                continue
+                            reag_pen2 = 120.0 * (cn_dist2 + oh_dist2)
+                        else:
+                            reag_pen2 = 18.0 * (cn_dist2 + oh_dist2)
 
-                                cn_dist2 = dist_to_band_scalar(new_cn2, reag_min, reag_max)
-                                oh_dist2 = dist_to_band_scalar(new_oh2, reag_min, reag_max)
-                                lowrec2 = (1.0 if r_arr[j] < rec_min else 0.0) + (1.0 if r_arr[kk] < rec_min else 0.0)
+                        fine_add2 = gtms[j] + gtms[kk]
 
-                                if enforce_reagents:
-                                    reag_pen2 = 120.0 * (cn_dist2 + oh_dist2)
-                                else:
-                                    reag_pen2 = 18.0 * (cn_dist2 + oh_dist2)
-
-                                fine_add2 = gtms[j] + gtms[kk]
-
-                                sc = (
-                                    18.0 * fill2
-                                    - 250.0 * g_pen2
-                                    - 90.0  * rec_pen2
-                                    - 25.0  * lowrec2
-                                    - reag_pen2
-                                    + 0.15 * add_tms2
-                                    + LAW_BONUS * new_g2
-                                    + FINE_BONUS * fine_add2
-                                )
+                        sc = (
+                            18.0 * fill2
+                            - 250.0 * g_pen2
+                            - 90.0  * rec_pen2
+                            - 25.0  * lowrec2
+                            - reag_pen2
+                            + 0.15 * add_tms2
+                            + LAW_BONUS * new_g2
+                            + FINE_BONUS * fine_add2
+                        )
 
                         if sc > best_score:
                             best_score = sc
@@ -1219,6 +1212,7 @@ def solve_one_pile(
                 cur_rtms += rtms[j]
                 cur_cntms += cntms[j]
                 cur_ohtms += ohtms[j]
+                cur_tmh += tmh_arr[j]
 
             if cur_tms >= min(tms_target, tms_max) - 1e-9:
                 break
@@ -1226,40 +1220,43 @@ def solve_one_pile(
         if not picked:
             continue
 
-        sol = base.iloc[picked].drop(columns=["is_lowrec"], errors="ignore").copy()
-        m = metrics(sol, pile_rec_min=rec_min)
+        # métricas rápidas (SPEED: sin DataFrame conversions)
+        picked_np = np.array(picked, dtype=int)
+        tms_sum = float(tms_arr[picked_np].sum())
+        if tms_sum <= 0 or tms_sum > tms_max + 1e-9:
+            continue
 
-        if m["tms"] <= 0 or m["tms"] > tms_max + 1e-9:
+        g_avg = float(gtms[picked_np].sum() / tms_sum)
+        r_avg = float(rtms[picked_np].sum() / tms_sum)
+        if r_avg < rec_min - 1e-9:
             continue
-        if m["rec_pct"] < rec_min - 1e-9:
+        if not grade_ok(g_avg, gmin, gmax, gmin_exclusive, gmax_inclusive):
             continue
-        if not grade_ok(m["au_gr_ton"], gmin, gmax, gmin_exclusive, gmax_inclusive):
-            continue
+
         if enforce_reagents:
-            if (not reag_ok(m["nacn_kg_t"], reag_min, reag_max)) or (not reag_ok(m["naoh_kg_t"], reag_min, reag_max)):
+            cn_avg = float(cntms[picked_np].sum() / tms_sum)
+            oh_avg = float(ohtms[picked_np].sum() / tms_sum)
+            if (not reag_ok(cn_avg, reag_min, reag_max)) or (not reag_ok(oh_avg, reag_min, reag_max)):
                 continue
 
-        under = max(0.0, tms_min - m["tms"])
-        gap = abs(m["tms"] - tms_target)
-        key = (under, gap, -m["au_fino"], -m["au_gr_ton"], -m["tms"], -m["rec_pct"])
+        au_fino_sum = float(gtms[picked_np].sum())
+        under = max(0.0, tms_min - tms_sum)
+        gap = abs(tms_sum - tms_target)
+
+        key = (under, gap, -au_fino_sum, -g_avg, -tms_sum, -r_avg)
         if best_key is None or key < best_key:
             best_key = key
-            best_sol = sol
+            best_picked = picked
 
-    if best_sol is None:
+    if best_picked is None:
         return pd.DataFrame()
 
-    best_sol = best_sol.copy()
-    best_sol["pile_type"] = pile_type
-    return best_sol
+    out = base.iloc[best_picked].copy()
+    out["pile_type"] = pile_type
+    return out
 
 
 def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.DataFrame:
-    """
-    BATCH con enfoque 2 etapas (REC), pero:
-    - Si el usuario baja pile_rec_min por debajo del default, primero intenta llenar SOLO con lotes
-      que cumplen el default (mejor calidad) y recién luego usa el universo más "pobre".
-    """
     pile_rec_min = float(params["pile_rec_min"])
     bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
@@ -1274,7 +1271,6 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         & (eligible["tmh_eff"] > 0)
     )
     eligible = eligible[m].copy()
-
     if eligible.empty:
         return pd.DataFrame()
 
@@ -1297,7 +1293,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             gmax=1e9,
             gmin_exclusive=False,
             gmax_inclusive=True,
-            rec_min=pile_rec_min,            # constraints = params (pueden ser más "pobres")
+            rec_min=pile_rec_min,
             enforce_reagents=True,
             reag_min=float(params["reag_min"]),
             reag_max=float(params["reag_max"]),
@@ -1309,7 +1305,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             pair_topk=int(params["batch_pair_topk"]),
             pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
+        if not p.empty and float(p["tms"].sum()) >= float(params["bat_tms_min"]) - 1e-9:
             return p, True
 
         p = solve_one_pile(
@@ -1334,17 +1330,16 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             pair_topk=int(params["batch_pair_topk"]),
             pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
+        if not p.empty and float(p["tms"].sum()) >= float(params["bat_tms_min"]) - 1e-9:
             return p, False
 
         return pd.DataFrame(), True
 
-    # Etapa 0 (PREFERENCIA): SOLO rec >= default_pile_rec_min (siempre empieza con "mejor calidad")
     pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
     eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
+
     p, enf_used = _try(eligible_pref, seed)
     if not p.empty:
-        # RELLENO: agrega lotes "más pobres" (>= pile_rec_min y < pref_rec) si ayuda a llegar al target
         pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
         p = top_up_pile(
             p, pool_poor,
@@ -1361,15 +1356,14 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         )
         return p
 
-    # Etapa 1: SOLO rec >= pile_rec_min (params)
     eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
     p, _ = _try(eligible_hi, seed)
     if not p.empty:
         return p
 
-    # Etapa 2: universo completo
     p, _ = _try(eligible, seed)
     return p
+
 
 def build_batch_with_limits(
     lots: pd.DataFrame,
@@ -1380,10 +1374,6 @@ def build_batch_with_limits(
     tms_target: float,
     tms_min: float,
 ) -> pd.DataFrame:
-    """
-    Igual a build_batch, pero con límites (tms_max/target/min) inyectados.
-    Útil para el Resultado 3: intentar 1 sola pila batch si todo entra.
-    """
     pile_rec_min = float(params["pile_rec_min"])
     bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
@@ -1432,7 +1422,7 @@ def build_batch_with_limits(
             pair_topk=int(params["batch_pair_topk"]),
             pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(tms_min) - 1e-9:
+        if not p.empty and float(p["tms"].sum()) >= float(tms_min) - 1e-9:
             return p, True
 
         p = solve_one_pile(
@@ -1457,12 +1447,11 @@ def build_batch_with_limits(
             pair_topk=int(params["batch_pair_topk"]),
             pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(tms_min) - 1e-9:
+        if not p.empty and float(p["tms"].sum()) >= float(tms_min) - 1e-9:
             return p, False
 
         return pd.DataFrame(), True
 
-    # misma lógica de preferencia por rec "mejor"
     pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
     eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
 
@@ -1492,8 +1481,9 @@ def build_batch_with_limits(
     p, _ = _try(eligible, seed)
     return p
 
+
 # =========================
-# SOLVE
+# SOLVE (SPEED: usa _cod y evita astype(str) repetido en loops)
 # =========================
 def solve(
     df_raw: pd.DataFrame,
@@ -1518,6 +1508,7 @@ def solve(
     pile_idx = 1
     seed_batch_base = int(params["seed_batch_base"])
 
+    # SPEED: filtra con _cod (ya existe)
     while True:
         p = build_batch(remaining, params, seed=seed_batch_base + pile_idx)
         if p.empty:
@@ -1526,35 +1517,32 @@ def solve(
         p["pile_code"] = pile_idx
         batch_piles.append(p)
 
-        used_codes = set(p["codigo"].astype(str).tolist())
-        remaining = remaining[~remaining["codigo"].astype(str).isin(used_codes)].copy()
+        used_codes = set(p.get("_cod", p["codigo"].astype(str)).tolist())
+        remaining = remaining[~remaining["_cod"].isin(used_codes)].copy()
         pile_idx += 1
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
-            # OUTPUT 3: mix (varios + batch)
+    # OUTPUT 3: mix (varios + batch)
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()
     if not mix_varios.empty:
         mix_varios["pile_code"] = 1
-        used_codes = set(mix_varios["codigo"].astype(str).tolist())
-        rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+        used_codes = set(mix_varios.get("_cod", mix_varios["codigo"].astype(str)).tolist())
+        rem_mix = rem_mix[~rem_mix["_cod"].isin(used_codes)].copy()
 
     seed_mix_base = int(params["seed_mix_batch"])
     pile_code = 2 if not mix_varios.empty else 1
 
-    # === NUEVO: intenta 1 sola pila batch si "entra" en una ===
+    # intenta 1 sola pila batch si entra
     mix_batch_piles = []
 
     if rem_mix is not None and not rem_mix.empty:
-        total_tms = float(pd.to_numeric(rem_mix["tms"], errors="coerce").fillna(0).sum())
+        total_tms = float(rem_mix["tms"].fillna(0).sum())
 
-        # si todo entra en una sola, sube el max SOLO para este intento (capado por var_tms_max)
         big_max = min(float(params["var_tms_max"]), max(float(params["bat_tms_max"]), total_tms))
         big_target = min(big_max, total_tms)
-
-        # asegura factibilidad (si target < bat_tms_min, baja el min a target)
         big_min = min(float(params["bat_tms_min"]), big_target)
 
         p_big = build_batch_with_limits(
@@ -1563,18 +1551,17 @@ def solve(
         )
 
         if p_big is not None and not p_big.empty:
-            m_big = metrics(p_big, pile_rec_min=float(params["pile_rec_min"]))
-            # acepta "1 sola" si captura casi todo lo que había (98%+)
-            if total_tms > 0 and (m_big["tms"] >= 0.98 * min(total_tms, big_max)):
+            m_big_tms = float(p_big["tms"].sum())
+            if total_tms > 0 and (m_big_tms >= 0.98 * min(total_tms, big_max)):
                 p_big = p_big.copy()
                 p_big["pile_code"] = pile_code
                 mix_batch_piles.append(p_big)
 
-                used_codes = set(p_big["codigo"].astype(str).tolist())
-                rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+                used_codes = set(p_big.get("_cod", p_big["codigo"].astype(str)).tolist())
+                rem_mix = rem_mix[~rem_mix["_cod"].isin(used_codes)].copy()
                 pile_code += 1
 
-    # === fallback: si NO se pudo hacer 1 sola, usa tu lógica N pilas batch normal ===
+    # fallback: N pilas batch normal
     if not mix_batch_piles:
         while True:
             p = build_batch(rem_mix, params, seed=seed_mix_base + pile_code)
@@ -1585,21 +1572,25 @@ def solve(
             p["pile_code"] = pile_code
             mix_batch_piles.append(p)
 
-            used_codes = set(p["codigo"].astype(str).tolist())
-            rem_mix = rem_mix[~rem_mix["codigo"].astype(str).isin(used_codes)].copy()
+            used_codes = set(p.get("_cod", p["codigo"].astype(str)).tolist())
+            rem_mix = rem_mix[~rem_mix["_cod"].isin(used_codes)].copy()
             pile_code += 1
 
     mix_batch = pd.concat(mix_batch_piles, ignore_index=True) if mix_batch_piles else pd.DataFrame()
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
 
-
     # remove used from rejects
     used_all = set()
     for _df in [p1, p2, p3]:
-        if _df is not None and not _df.empty and "codigo" in _df.columns:
-            used_all.update(_df["codigo"].astype(str).tolist())
+        if _df is not None and not _df.empty:
+            used_all.update(_df.get("_cod", _df["codigo"].astype(str)).tolist())
 
     if rej_lowrec is not None and not rej_lowrec.empty and used_all:
         rej_lowrec = rej_lowrec[~rej_lowrec["codigo"].astype(str).isin(used_all)].copy()
+
+    # NO CAMBIAR tu contrato: limpia columnas internas
+    for _df in [p1, p2, p3]:
+        if _df is not None and not _df.empty:
+            _df.drop(columns=["_cod"], errors="ignore", inplace=True)
 
     return p1, p2, p3, rej_lowrec

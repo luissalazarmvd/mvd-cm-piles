@@ -325,9 +325,10 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         "ag_oz_tc", "ag_gr_ton", "ag_fino",
         "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct"
     ]
-    for c in num_cols:
-        if c in d.columns:
-            d[c] = pd.to_numeric(d[c], errors="coerce")
+    cols = [c for c in num_cols if c in d.columns]
+    if cols:
+        d[cols] = d[cols].apply(pd.to_numeric, errors="coerce")
+
 
     # Ensure columns
     if "zona" not in d.columns:
@@ -521,21 +522,19 @@ def top_up_pile(
     reag_min: float,
     reag_max: float,
 ) -> pd.DataFrame:
-    if pile is None or pile.empty:
-        return pile
-    if pool is None or pool.empty:
+    if pile is None or pile.empty or pool is None or pool.empty:
         return pile
 
     cur = pile.copy()
     used = set(cur["codigo"].astype(str).tolist())
 
-    cand = pool.copy()
-    cand = cand.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    cand = pool.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
     cand = cand[(cand["tms"] > 0) & (cand["tmh_eff"] > 0)].copy()
     if cand.empty:
         return cur
 
-    cand = cand[~cand["codigo"].astype(str).isin(used)].copy()
+    cand["_cod"] = cand["codigo"].astype(str)
+    cand = cand[~cand["_cod"].isin(used)].copy()
     if cand.empty:
         return cur
 
@@ -544,71 +543,58 @@ def top_up_pile(
         if cand.empty:
             return cur
 
-    def _sumcol(df_: pd.DataFrame, col: str) -> float:
-        return float(pd.to_numeric(df_.get(col, pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
+    # --- numpy arrays (1 sola vez) ---
+    tms = pd.to_numeric(cand["tms"], errors="coerce").fillna(0).to_numpy(float)
+    g   = pd.to_numeric(cand["au_gr_ton"], errors="coerce").to_numpy(float)
+    r   = pd.to_numeric(cand["rec_pct"], errors="coerce").to_numpy(float)
+    cn  = pd.to_numeric(cand["nacn_kg_t"], errors="coerce").to_numpy(float)
+    oh  = pd.to_numeric(cand["naoh_kg_t"], errors="coerce").to_numpy(float)
+    codes = cand["_cod"].to_numpy(object)
 
-    # acumulados actuales
-    cur_tms = _sumcol(cur, "tms")
+    # orden preferente: rec desc, tms desc
+    order = np.lexsort((-tms, -r))
+
+    # acumulados actuales (tms, gtms, rtms, cntms, ohtms)
+    cur_tms = float(pd.to_numeric(cur["tms"], errors="coerce").fillna(0).sum())
     cur_gtms = float((pd.to_numeric(cur["au_gr_ton"], errors="coerce").fillna(0).to_numpy(float) *
                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
     cur_rtms = float((pd.to_numeric(cur["rec_pct"], errors="coerce").fillna(0).to_numpy(float) *
                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
-
     cur_cntms = float((pd.to_numeric(cur["nacn_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
                        pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
     cur_ohtms = float((pd.to_numeric(cur["naoh_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
                        pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
 
-    # loop greedy: agrega el mejor candidato que acerque a target sin romper constraints
+    alive = np.ones(len(cand), dtype=bool)
+
     max_iters = int(len(cand) + 5)
-    it = 0
-
-    while it < max_iters:
-        it += 1
-
+    for _ in range(max_iters):
         cap = tms_max - cur_tms
         if cap <= 1e-9:
             break
-
-        # si ya está suficientemente cerca o por encima del target, paramos
         if cur_tms >= min(tms_target, tms_max) - 1e-6:
             break
 
-        best_i = None
+        best_j = -1
         best_key = None
 
-        # ordena candidatos por: rec desc (más seguro), luego tms desc (más volumen)
-        cand2 = cand.copy()
-        cand2["_rec"] = pd.to_numeric(cand2["rec_pct"], errors="coerce").fillna(-1e9)
-        cand2["_tms"] = pd.to_numeric(cand2["tms"], errors="coerce").fillna(0)
-        cand2 = cand2.sort_values(by=["_rec", "_tms"], ascending=[False, False])
-
-        for i, row in cand2.iterrows():
-            tms_i = float(_to_float(row.get("tms"), 0.0))
-            if tms_i <= 0 or tms_i > cap + 1e-9:
+        # recorre en orden preferente (rápido)
+        for j in order:
+            if not alive[j]:
+                continue
+            tms_j = tms[j]
+            if tms_j <= 0 or tms_j > cap + 1e-9:
                 continue
 
-            g_i = float(_to_float(row.get("au_gr_ton"), float("nan")))
-            r_i = float(_to_float(row.get("rec_pct"), float("nan")))
-            if not math.isfinite(g_i) or not math.isfinite(r_i):
+            gj = g[j]; rj = r[j]
+            if not math.isfinite(gj) or not math.isfinite(rj):
+                continue
+            if enforce_reagents and (not math.isfinite(cn[j]) or not math.isfinite(oh[j])):
                 continue
 
-            cn_i = float(_to_float(row.get("nacn_kg_t"), float("nan")))
-            oh_i = float(_to_float(row.get("naoh_kg_t"), float("nan")))
-            if enforce_reagents and (not math.isfinite(cn_i) or not math.isfinite(oh_i)):
-                continue
-
-            new_tms = cur_tms + tms_i
-            if new_tms <= 0:
-                continue
-            if new_tms > tms_max + 1e-9:
-                continue
-
-            new_gtms = cur_gtms + (g_i * tms_i)
-            new_rtms = cur_rtms + (r_i * tms_i)
-
-            new_g = new_gtms / new_tms
-            new_r = new_rtms / new_tms
+            new_tms = cur_tms + tms_j
+            new_g = (cur_gtms + gj * tms_j) / new_tms
+            new_r = (cur_rtms + rj * tms_j) / new_tms
 
             if new_r < rec_min - 1e-9:
                 continue
@@ -616,51 +602,35 @@ def top_up_pile(
                 continue
 
             if enforce_reagents:
-                new_cntms = cur_cntms + (cn_i * tms_i)
-                new_ohtms = cur_ohtms + (oh_i * tms_i)
-                new_cn = new_cntms / new_tms
-                new_oh = new_ohtms / new_tms
+                new_cn = (cur_cntms + cn[j] * tms_j) / new_tms
+                new_oh = (cur_ohtms + oh[j] * tms_j) / new_tms
                 if (not reag_ok(new_cn, reag_min, reag_max)) or (not reag_ok(new_oh, reag_min, reag_max)):
                     continue
 
             gap = abs(new_tms - tms_target)
-            # key: menor gap, mayor tms
             key = (gap, -new_tms)
-
             if best_key is None or key < best_key:
                 best_key = key
-                best_i = i
+                best_j = j
+                if gap <= 1e-6:
+                    break
 
-            # si encontramos uno que ya deja casi exacto, cortamos búsqueda
-            if best_key is not None and best_key[0] <= 1e-6:
-                break
-
-        if best_i is None:
+        if best_j < 0:
             break
 
-        add_row = cand.loc[[best_i]].copy()
-        cur = pd.concat([cur, add_row], ignore_index=True)
+        # agrega fila sin recomputar todo
+        add = cand.iloc[[best_j]].drop(columns=["_cod"], errors="ignore").copy()
+        cur = pd.concat([cur, add], ignore_index=True)
 
-        # actualiza acumulados
-        tms_i = float(_to_float(add_row.iloc[0].get("tms"), 0.0))
-        g_i = float(_to_float(add_row.iloc[0].get("au_gr_ton"), 0.0))
-        r_i = float(_to_float(add_row.iloc[0].get("rec_pct"), 0.0))
-        cn_i = float(_to_float(add_row.iloc[0].get("nacn_kg_t"), 0.0))
-        oh_i = float(_to_float(add_row.iloc[0].get("naoh_kg_t"), 0.0))
+        cur_tms += float(tms[best_j])
+        cur_gtms += float(g[best_j] * tms[best_j])
+        cur_rtms += float(r[best_j] * tms[best_j])
+        cur_cntms += float((0.0 if not math.isfinite(cn[best_j]) else cn[best_j]) * tms[best_j])
+        cur_ohtms += float((0.0 if not math.isfinite(oh[best_j]) else oh[best_j]) * tms[best_j])
 
-        cur_tms += tms_i
-        cur_gtms += (g_i * tms_i)
-        cur_rtms += (r_i * tms_i)
-        cur_cntms += (cn_i * tms_i)
-        cur_ohtms += (oh_i * tms_i)
+        alive[best_j] = False
+        used.add(str(codes[best_j]))
 
-        used.add(str(add_row.iloc[0].get("codigo")))
-        cand = cand[~cand["codigo"].astype(str).isin(used)].copy()
-        if cand.empty:
-            break
-
-    # limpia helper cols si quedaron (por si)
-    cur = cur.drop(columns=[c for c in ["_rec", "_tms"] if c in cur.columns], errors="ignore")
     return cur
 
 
@@ -879,8 +849,17 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     pile_rec_min = float(params["pile_rec_min"])
 
     eligible = lots.copy()
-    eligible = eligible.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
-    eligible = eligible[(eligible["tms"] > 0) & (eligible["tmh_eff"] > 0)].copy()
+    m = (
+        eligible["codigo"].notna()
+        & eligible["tms"].notna()
+        & eligible["au_gr_ton"].notna()
+        & eligible["rec_pct"].notna()
+        & eligible["tmh_eff"].notna()
+        & (eligible["tms"] > 0)
+        & (eligible["tmh_eff"] > 0)
+    )
+    eligible = eligible[m].copy()
+
     if eligible.empty:
         return pd.DataFrame()
 
@@ -1114,6 +1093,11 @@ def solve_one_pile(
 
             cand_np = np.array(cand, dtype=int)
 
+            if enforce_reagents and bad_reag.any():
+                cand_np = cand_np[~bad_reag[cand_np]]
+                if cand_np.size == 0:
+                    continue
+
             add_tms = tms_arr[cand_np]
             new_tms = cur_tms + add_tms
 
@@ -1280,8 +1264,17 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
     bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
     eligible = lots.copy()
-    eligible = eligible.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
-    eligible = eligible[(eligible["tms"] > 0) & (eligible["tmh_eff"] > 0)].copy()
+    m = (
+        eligible["codigo"].notna()
+        & eligible["tms"].notna()
+        & eligible["au_gr_ton"].notna()
+        & eligible["rec_pct"].notna()
+        & eligible["tmh_eff"].notna()
+        & (eligible["tms"] > 0)
+        & (eligible["tmh_eff"] > 0)
+    )
+    eligible = eligible[m].copy()
+
     if eligible.empty:
         return pd.DataFrame()
 

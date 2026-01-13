@@ -1,11 +1,11 @@
-# runner/main.py
 from fastapi import FastAPI, HTTPException, Request
 from supabase import create_client, Client
 import pandas as pd
 import numpy as np
 import math
+from datetime import datetime, date
 
-from solver import solve  # solver.py (AHORA retorna p1, p2, p3, rej_lowrec)
+from solver import solve  # solver.py (retorna p1, p2, p3, rej_lowrec)
 
 app = FastAPI()
 
@@ -13,7 +13,7 @@ app = FastAPI()
 # 0) CONFIG / CONEXIÓN (HARDCODE)  <-- NO TOCAR LÓGICA
 # =========================
 SUPABASE_URL = "https://iffytelelyatppieocrv.supabase.co"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZnl0ZWxlbHlhdHBwaWVvY3J2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Njc2NTQxMiwiZXhwIjoyMDgyMzQxNDEyfQ.w9NHMxOIh2JUsjL6eMAuH0IMEvudMpYFNFG-s8wzVX8"
+SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlmZnl0ZWxlbHlhdHBwaWVvY3J2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2Njc2NTQxMiwiZXhwIjoyMDgyMzQxNDEyfQ.w9NHMxOIh2JUsjL6eMAuH0IMEvudMpYFNFG-s8wzVX8"  # <- deja tu key real acá
 
 # Si no quieres auth por header, deja RUNNER_SECRET = "" y no validará nada
 RUNNER_SECRET = "mvdRunnerSecret20260112A7f3c9d1e5b8a0c2f4d6e8a1c3e5b7d9"
@@ -44,7 +44,7 @@ REJ_COLS = [
 ]
 
 # =========================
-# 2) ETL (Sheets -> stg_lotes_daily)  <-- NUEVO
+# 2) ETL (Sheets -> stg_lotes_daily)
 # =========================
 SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTcdo7w_95mj8y1UuknvR5cS7EfCH5yOUl2umOUtFyn-lUlCKr_oJyHoDjkoNcjamJRRlDY0wtBQ5QE/pub?gid=2143480377&single=true&output=csv"
 
@@ -78,11 +78,32 @@ def auth(req: Request):
             raise HTTPException(status_code=401, detail="unauthorized")
 
 
+# ✅ CLAVE: convertir Timestamp/datetime a ISO string para JSON/Supabase
 def _to_native(x):
     if x is None:
         return None
+
+    # pandas Timestamp
+    if isinstance(x, pd.Timestamp):
+        if pd.isna(x):
+            return None
+        # a ISO 8601; si tiene tz la mantiene como +00:00
+        return x.to_pydatetime().isoformat()
+
+    # datetime/date
+    if isinstance(x, datetime):
+        return x.isoformat()
+    if isinstance(x, date):
+        return x.isoformat()
+
+    # numpy scalars
     if isinstance(x, (np.floating, np.integer)):
         return x.item()
+
+    # NaN floats
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return None
+
     return x
 
 
@@ -154,6 +175,16 @@ def json_safe(v):
             return None
     except Exception:
         pass
+
+    # ✅ por si llega Timestamp/datetime
+    if isinstance(v, pd.Timestamp):
+        if pd.isna(v):
+            return None
+        return v.to_pydatetime().isoformat()
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
 
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):
@@ -245,67 +276,69 @@ def run_etl_from_sheets() -> dict:
 @app.post("/etl")
 async def etl(req: Request):
     auth(req)
-
-    # payload opcional (por si luego quieres flags). Hoy no se usa.
     try:
-        _ = await req.json()
-    except:
-        pass
+        try:
+            _ = await req.json()
+        except:
+            pass
 
-    try:
         info = run_etl_from_sheets()
         return {"ok": True, **info}
+
     except Exception as e:
+        # ✅ SIEMPRE JSON
         return {"ok": False, "error": str(e)}
 
 
 @app.post("/run")
 async def run(req: Request):
     auth(req)
-
-    # 0) leer payload UI (si viene). Si no viene o es inválido, queda {}
-    payload = {}
     try:
-        payload = await req.json()
-        if not isinstance(payload, dict):
-            payload = {}
-    except:
+        # 0) leer payload UI (si viene). Si no viene o es inválido, queda {}
         payload = {}
+        try:
+            payload = await req.json()
+            if not isinstance(payload, dict):
+                payload = {}
+        except:
+            payload = {}
 
-    # 1) leer input
-    resp = supabase.table(STG_TABLE).select("*").execute()
-    rows = resp.data or []
-    if not rows:
-        return {"ok": False, "error": "stg_lotes_daily vacío"}
+        # 1) leer input
+        resp = supabase.table(STG_TABLE).select("*").execute()
+        rows = resp.data or []
+        if not rows:
+            return {"ok": False, "error": "stg_lotes_daily vacío"}
 
-    df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
 
-    # 2) correr solver (con payload opcional)
-    #    AHORA: retorna 4 dataframes
-    p1, p2, p3, rej_lowrec = solve(df, payload)
+        # 2) correr solver (con payload opcional)
+        p1, p2, p3, rej_lowrec = solve(df, payload)
 
-    # 3) preparar payloads
-    payload_1 = prep_payload(p1)
-    payload_2 = prep_payload(p2)
-    payload_3 = prep_payload(p3)
-    payload_rej = prep_payload_rej(rej_lowrec)
+        # 3) preparar payloads (✅ convierte loaded_at a ISO)
+        payload_1 = prep_payload(p1)
+        payload_2 = prep_payload(p2)
+        payload_3 = prep_payload(p3)
+        payload_rej = prep_payload_rej(rej_lowrec)
 
-    # 4) delete + insert (pila outputs)
-    delete_all("res_pila_1")
-    delete_all("res_pila_2")
-    delete_all("res_pila_3")
+        # 4) delete + insert (pila outputs)
+        delete_all("res_pila_1")
+        delete_all("res_pila_2")
+        delete_all("res_pila_3")
 
-    ins1 = insert_chunks("res_pila_1", payload_1)
-    ins2 = insert_chunks("res_pila_2", payload_2)
-    ins3 = insert_chunks("res_pila_3", payload_3)
+        ins1 = insert_chunks("res_pila_1", payload_1)
+        ins2 = insert_chunks("res_pila_2", payload_2)
+        ins3 = insert_chunks("res_pila_3", payload_3)
 
-    # 5) delete + insert (rechazos por baja rec)
-    #    Nota: esta tabla NO tiene id, borramos por loaded_at.
-    delete_by_loaded_at(REJ_TABLE)
-    ins_rej = insert_chunks(REJ_TABLE, payload_rej)
+        # 5) delete + insert (rechazos por baja rec)
+        delete_by_loaded_at(REJ_TABLE)
+        ins_rej = insert_chunks(REJ_TABLE, payload_rej)
 
-    return {
-        "ok": True,
-        "inserted": {"p1": ins1, "p2": ins2, "p3": ins3, "rej_lowrec": ins_rej},
-        "payload_used": payload,  # debug
-    }
+        return {
+            "ok": True,
+            "inserted": {"p1": ins1, "p2": ins2, "p3": ins3, "rej_lowrec": ins_rej},
+            "payload_used": payload,  # debug
+        }
+
+    except Exception as e:
+        # ✅ SIEMPRE JSON (evita "Runner no devolvió JSON")
+        return {"ok": False, "error": str(e)}

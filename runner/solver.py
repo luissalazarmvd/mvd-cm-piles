@@ -12,7 +12,7 @@ import pandas as pd
 # =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
     # filtros / restricciones
-    "lot_rec_min": 85.0,      # filtro duro por lote
+    "lot_rec_min": 85.0,      # filtro duro por lote (para entrar al solver)
     "pile_rec_min": 85.0,     # rec ponderada de pila >= 85
     "lot_tms_min": 0.0,       # TMS mínima por lote (0 = no filtra)
 
@@ -87,7 +87,6 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
     if x is None:
         return default
 
-    # dict {"gmin":..,"gmax":..}
     if isinstance(x, dict) and ("gmin" in x) and ("gmax" in x):
         gmin = _to_float(x.get("gmin"), float("nan"))
         gmax = _to_float(x.get("gmax"), float("nan"))
@@ -97,7 +96,6 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
             return [(float(gmin), float(gmax))]
         return default
 
-    # tuple/list (gmin,gmax)
     if isinstance(x, (list, tuple)) and len(x) == 2 and not (
         len(x) > 0 and isinstance(x[0], (list, tuple, dict))
     ):
@@ -109,7 +107,6 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
             return [(float(gmin), float(gmax))]
         return default
 
-    # lista de pares
     if isinstance(x, list):
         out: List[Tuple[float, float]] = []
         for item in x:
@@ -149,7 +146,6 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
     if x is None:
         return None
 
-    # si viene dict raro, ignora
     if isinstance(x, dict):
         return None
 
@@ -163,11 +159,9 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
     else:
         s = _normalize_zone_str(x)
         if s:
-            # split por coma si aplica
             parts = [p.strip() for p in s.split(",")]
             out.extend([p for p in parts if p])
 
-    # unique preservando orden
     seen = set()
     uniq: List[str] = []
     for s in out:
@@ -197,9 +191,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not payload or not isinstance(payload, dict):
         return p
 
-    # ---------
-    # 0) compat legacy: si UI manda tmh_*, mapear a tms_*
-    # ---------
     legacy_map = {
         "lot_tmh_min": "lot_tms_min",
         "var_tmh_max": "var_tms_max",
@@ -213,9 +204,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if lk in payload and nk not in payload:
             payload[nk] = payload.get(lk)
 
-    # ---------
-    # 1) flat floats (compat)
-    # ---------
     for k in [
         "lot_rec_min", "pile_rec_min", "lot_tms_min",
         "var_tms_max", "var_tms_target", "var_tms_min",
@@ -226,19 +214,14 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if k in payload:
             p[k] = _to_float(payload.get(k), p[k])
 
-    # flat: zones / zonas (compat)
     if "zones" in payload:
         p["zones"] = _parse_str_list(payload.get("zones"))
     elif "zonas" in payload:
         p["zones"] = _parse_str_list(payload.get("zonas"))
 
-    # ---------
-    # 2) nested: filters
-    # ---------
     if isinstance(payload.get("filters"), dict):
         f = payload["filters"]
 
-        # compat inside filters también
         if "lot_tmh_min" in f and "lot_tms_min" not in f:
             f["lot_tms_min"] = f.get("lot_tmh_min")
 
@@ -246,22 +229,16 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if k in f:
                 p[k] = _to_float(f.get(k), p[k])
 
-        # zones in filters: zones / zonas / zona
         if "zones" in f:
             p["zones"] = _parse_str_list(f.get("zones"))
         elif "zonas" in f:
             p["zones"] = _parse_str_list(f.get("zonas"))
         elif "zona" in f:
-            # permite pasar una sola zona como string
             p["zones"] = _parse_str_list(f.get("zona"))
 
-    # ---------
-    # 3) nested: varios / batch / reagents
-    # ---------
     if isinstance(payload.get("varios"), dict):
         v = payload["varios"]
 
-        # compat dentro de varios
         if "var_tmh_max" in v and "var_tms_max" not in v: v["var_tms_max"] = v.get("var_tmh_max")
         if "var_tmh_target" in v and "var_tms_target" not in v: v["var_tms_target"] = v.get("var_tmh_target")
         if "var_tmh_min" in v and "var_tms_min" not in v: v["var_tms_min"] = v.get("var_tmh_min")
@@ -275,7 +252,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(payload.get("batch"), dict):
         b = payload["batch"]
 
-        # compat dentro de batch
         if "bat_tmh_max" in b and "bat_tms_max" not in b: b["bat_tms_max"] = b.get("bat_tmh_max")
         if "bat_tmh_target" in b and "bat_tms_target" not in b: b["bat_tms_target"] = b.get("bat_tmh_target")
         if "bat_tmh_min" in b and "bat_tms_min" not in b: b["bat_tms_min"] = b.get("bat_tmh_min")
@@ -290,13 +266,9 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if k in r:
                 p[k] = _to_float(r.get(k), p[k])
 
-    # compat: var_g_tries top-level
     if "var_g_tries" in payload:
         p["var_g_tries"] = _parse_var_g_tries(payload.get("var_g_tries"), p["var_g_tries"])
 
-    # ---------
-    # 4) ints: knobs/seeds (flat + nested)
-    # ---------
     int_keys = [
         "batch_n_iters_hard", "batch_n_iters_soft",
         "batch_max_steps", "batch_cand_sample",
@@ -323,9 +295,6 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if k in sx:
                 p[k] = _to_int(sx.get(k), p[k])
 
-    # ---------
-    # saneos mínimos
-    # ---------
     if p["reag_min"] > p["reag_max"]:
         p["reag_min"], p["reag_max"] = p["reag_max"], p["reag_min"]
 
@@ -335,34 +304,57 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if p["bat_tms_min"] > p["bat_tms_max"]:
         p["bat_tms_min"] = p["bat_tms_max"]
 
-    # target dentro de [min,max]
     p["var_tms_target"] = max(float(p["var_tms_min"]), min(float(p["var_tms_target"]), float(p["var_tms_max"])))
     p["bat_tms_target"] = max(float(p["bat_tms_min"]), min(float(p["bat_tms_target"]), float(p["bat_tms_max"])))
 
-    # var_g_tries no vacío
     if not isinstance(p.get("var_g_tries"), list) or len(p["var_g_tries"]) == 0:
         p["var_g_tries"] = list(DEFAULT_PARAMS["var_g_tries"])
 
-    # bat_lot_g_min no negativo
     if float(p.get("bat_lot_g_min", 0.0) or 0.0) < 0:
         p["bat_lot_g_min"] = 0.0
 
-    # zones: si viene [] o "" => None (todas)
     p["zones"] = _parse_str_list(p.get("zones"))
 
     return p
 
 
 # =========================
-# 1) PREP DATA (misma lógica que tu código funcional)
+# Rechazos por baja recuperación (para la nueva tabla)
 # =========================
-def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+REJ_REC_CEIL = 85.0  # solo candidatos a la tabla de "no usados por baja rec" si rec_pct < 85
+
+def _classify_rec_series(rec: pd.Series) -> pd.Series:
+    r = pd.to_numeric(rec, errors="coerce")
+    conds = [
+        (r < 85) & (r >= 80),
+        (r < 80) & (r >= 70),
+        (r < 70),
+    ]
+    choices = ["80%-85%", "70%-80%", "<70%"]
+    out = np.select(conds, choices, default=None)
+    return pd.Series(out, index=rec.index, dtype="object")
+
+
+# =========================
+# 1) PREP DATA (base común)
+# =========================
+def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Limpieza base común (sin filtrar por rec).
+    Mantiene:
+      - último loaded_at
+      - coerciones numéricas
+      - cálculo tms si falta
+      - tmh_eff
+      - finos si faltan
+      - filtros mínimos: codigo, au_gr_ton, rec_pct, tms>0, tmh_eff>0, lot_tms_min
+      - filtro por zones si aplica
+    """
     if df is None or df.empty:
         return pd.DataFrame()
 
     d = df.copy()
 
-    # quedarnos con el último loaded_at (si aplica)
     if "loaded_at" in d.columns and d["loaded_at"].notna().any():
         d["loaded_at"] = pd.to_datetime(d["loaded_at"], utc=True, errors="coerce")
         last_load = d["loaded_at"].max()
@@ -378,9 +370,6 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
-    # limpieza mínima base
-    d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
-
     # asegurar columnas
     if "zona" not in d.columns:
         d["zona"] = np.nan
@@ -388,14 +377,13 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if "tmh" not in d.columns: d["tmh"] = np.nan
     if "humedad_pct" not in d.columns: d["humedad_pct"] = np.nan
 
-    # ---------
+    # requiere lo mínimo para operar / clasificar
+    d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
+
     # filtro por ZONAS (si viene lista desde UI)
-    # - default: None => no filtra (todas)
-    # ---------
     zones = params.get("zones", None)
     zones_list = _parse_str_list(zones)
     if zones_list is not None and len(zones_list) > 0:
-        # normaliza para match case-insensitive
         zset = set([str(z).strip().casefold() for z in zones_list if str(z).strip() != ""])
         d["_zona_norm"] = d["zona"].astype(str).str.strip().str.casefold()
         d = d[d["_zona_norm"].isin(zset)].copy()
@@ -415,10 +403,8 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         (1 - d.loc[mask_tms_bad & mask_can_calc, "humedad_pct"] / 100.0)
     )
 
-    # tmh_eff solo para reporting / cálculos secundarios; el "tamaño" ahora es tms
     d["tmh_eff"] = d["tmh"].where(d["tmh"].notna() & (d["tmh"] > 0), d["tms"])
 
-    # requiere tms > 0 (porque ahora es la base de todo)
     d = d.dropna(subset=["tms"]).copy()
     d = d[(d["tms"] > 0)].copy()
     d = d.dropna(subset=["tmh_eff"]).copy()
@@ -428,6 +414,8 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     lot_tms_min = float(params.get("lot_tms_min", 0.0) or 0.0)
     if lot_tms_min > 0:
         d = d[d["tms"] >= lot_tms_min].copy()
+        if d.empty:
+            return pd.DataFrame()
 
     # reagentes: si no existen, crear
     if "nacn_kg_t" not in d.columns: d["nacn_kg_t"] = np.nan
@@ -447,12 +435,64 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     else:
         d.loc[mask_agf, "ag_fino"] = np.nan
 
-    # filtro duro por rec de lote
+    return d
+
+
+def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Igual que antes (para el solver): aplica filtro duro por rec >= lot_rec_min.
+    """
+    d = _prep_base(df, params)
+    if d is None or d.empty:
+        return pd.DataFrame()
+
     lot_rec_min = float(params.get("lot_rec_min", 85.0))
     d = d[d["rec_pct"].notna()].copy()
     d = d[d["rec_pct"] >= lot_rec_min].copy()
 
     return d
+
+
+def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Construye df para insertar en la nueva tabla stg_lotes_daily_rec:
+    - Solo lotes con rec_pct < 85
+    - Clasifica rec_class en:
+        "80%-85%" (<85, >=80)
+        "70%-80%" (<80, >=70)
+        "<70%" (<70)
+    - NO incluye lotes >=85
+    - Respeta el filtro de zonas y lot_tms_min (mismo scope del run)
+    """
+    d = _prep_base(df, params)
+    if d is None or d.empty:
+        return pd.DataFrame()
+
+    d = d[d["rec_pct"].notna()].copy()
+    d = d[d["rec_pct"] < REJ_REC_CEIL].copy()
+    if d.empty:
+        return pd.DataFrame()
+
+    d["rec_class"] = _classify_rec_series(d["rec_pct"])
+    d = d[d["rec_class"].notna()].copy()
+    if d.empty:
+        return pd.DataFrame()
+
+    # dejar columnas iguales a stg + rec_class
+    cols = [
+        "codigo", "zona",
+        "tmh", "humedad_pct", "tms",
+        "au_oz_tc", "au_gr_ton", "au_fino",
+        "ag_oz_tc", "ag_gr_ton", "ag_fino",
+        "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+        "rec_class",
+        "loaded_at",
+    ]
+    for c in cols:
+        if c not in d.columns:
+            d[c] = np.nan
+
+    return d[cols].copy()
 
 
 # =========================
@@ -465,7 +505,6 @@ def wavg(values: pd.Series, weights: pd.Series) -> float:
     return float((v * w).sum() / denom) if denom > 0 else float("nan")
 
 def metrics(d: pd.DataFrame, pile_rec_min: float) -> dict:
-    # ponderaciones por TMS (si faltara, fallback a tmh_eff)
     w = d["tms"].where(d["tms"].notna() & (d["tms"] > 0), d["tmh_eff"])
     return {
         "tmh": float(pd.to_numeric(d["tmh_eff"], errors="coerce").fillna(0).sum()),
@@ -683,9 +722,9 @@ def build_varios_trim(
         dens = au_fino[idx] / np.maximum(tms[idx], 1e-9)
 
         ord_idx = np.lexsort((
-            -tms2,  # mayor TMS remanente
-            dens,   # menor Au/TMS perdido
-            pen2    # menor penalty
+            -tms2,
+            dens,
+            pen2
         ))
         pick_pos = int(ord_idx[0])
         j = int(idx[pick_pos])
@@ -744,7 +783,6 @@ def solve_one_pile(
     d = lots.copy()
     d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
     d = d[(d["tms"] > 0)].copy()
-    # tmh_eff solo para output/metrics
     d = d.dropna(subset=["tmh_eff"]).copy()
     d = d[(d["tmh_eff"] > 0)].copy()
     if d.empty:
@@ -919,7 +957,7 @@ def solve_one_pile(
                         else:
                             add_tms2 = tms_arr[j] + tms_arr[kk]
                             if add_tms2 <= 0:
-                                sc = -1e-18
+                                sc = -1e18
                             else:
                                 new_tms2 = cur_tms + add_tms2
                                 new_g2  = (cur_gtms + gtms[j] + gtms[kk]) / new_tms2
@@ -1007,15 +1045,6 @@ def solve_one_pile(
 
 
 def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.DataFrame:
-    """
-    Batch:
-    - NO debe depender de tamaño/ley mínima por lote.
-    - Debe cumplir:
-      * TMS: [bat_tms_min, bat_tms_max] apuntando a bat_tms_target
-      * Ley de pila: [bat_pile_g_min, bat_pile_g_max]
-      * Rec ponderada >= pile_rec_min
-      * Reagentes ponderados dentro de [reag_min, reag_max] (si enforce_reagents=True)
-    """
     pile_rec_min = float(params["pile_rec_min"])
     bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
@@ -1025,13 +1054,11 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
     if eligible.empty:
         return pd.DataFrame()
 
-    # opcional: si en algún momento quieres filtrar lotes por ley (por defecto 0 => no filtra)
     if bat_lot_g_min > 0:
         eligible = eligible[eligible["au_gr_ton"] >= bat_lot_g_min].copy()
         if eligible.empty:
             return pd.DataFrame()
 
-    # HARD reagentes
     p = solve_one_pile(
         lots=eligible,
         pile_type="batch",
@@ -1057,7 +1084,6 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
     if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
         return p
 
-    # SOFT reagentes
     p = solve_one_pile(
         lots=eligible,
         pile_type="batch",
@@ -1096,7 +1122,6 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
     var_g_tries: List[Tuple[float, float]] = list(params["var_g_tries"])
 
-    # intento 1: reagentes hard
     for (gmin, gmax) in var_g_tries:
         p = build_varios_trim(
             lots=lots,
@@ -1115,7 +1140,6 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
             if m["tms"] >= var_tms_min - 1e-9 and m["tms"] <= var_tms_max + 1e-9:
                 return p
 
-    # intento 2: reagentes soft (fallback)
     for (gmin, gmax) in var_g_tries:
         p = build_varios_trim(
             lots=lots,
@@ -1137,19 +1161,30 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def solve(df_raw: pd.DataFrame, payload: Optional[Dict[str, Any]] = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def solve(
+    df_raw: pd.DataFrame,
+    payload: Optional[Dict[str, Any]] = None
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Input: df con columnas de stg_lotes_daily.
     payload: overrides desde UI (opcional).
       - Para zonas: payload["zones"] o payload["filters"]["zones"] (o "zonas").
         Si no viene, se asume "todas" (no filtra).
-    Output: p1, p2, p3 listos para insertar.
+
+    Output:
+      p1, p2, p3 listos para insertar en res_pila_1/2/3
+      rej_lowrec: lotes NO usados por baja recuperación (<85) para insertar en stg_lotes_daily_rec
     """
     params = resolve_params(payload)
 
+    # 0) construir candidatos a "rechazados por baja rec" desde el raw (sin afectar solver)
+    rej_lowrec = build_rejects_lowrec(df_raw, params)
+
+    # 1) solver usa el preprocess normal (rec >= lot_rec_min)
     df = preprocess(df_raw, params)
     if df.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        # igual devolvemos rechazos (si hay)
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), rej_lowrec
 
     # OUTPUT 1: 1 pila varios
     p1 = build_varios(df, params).copy()
@@ -1160,7 +1195,6 @@ def solve(df_raw: pd.DataFrame, payload: Optional[Dict[str, Any]] = None) -> tup
     remaining = df.copy()
     batch_piles = []
     pile_idx = 1
-
     seed_batch_base = int(params["seed_batch_base"])
 
     while True:
@@ -1192,4 +1226,13 @@ def solve(df_raw: pd.DataFrame, payload: Optional[Dict[str, Any]] = None) -> tup
 
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
 
-    return p1, p2, p3
+    # 2) Seguridad extra: si por algún cambio futuro algún <85 entrara a pilas, no lo mandes a rechazos
+    used_all = set()
+    for _df in [p1, p2, p3]:
+        if _df is not None and not _df.empty and "codigo" in _df.columns:
+            used_all.update(_df["codigo"].astype(str).tolist())
+
+    if rej_lowrec is not None and not rej_lowrec.empty and used_all:
+        rej_lowrec = rej_lowrec[~rej_lowrec["codigo"].astype(str).isin(used_all)].copy()
+
+    return p1, p2, p3, rej_lowrec

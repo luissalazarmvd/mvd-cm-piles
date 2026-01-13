@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import math
 
-from solver import solve  # solver.py (ya acepta payload opcional)
+from solver import solve  # solver.py (AHORA retorna p1, p2, p3, rej_lowrec)
 
 app = FastAPI()
 
@@ -30,6 +30,17 @@ OUTPUT_COLS = [
     "au_oz_tc", "au_gr_ton", "au_fino",
     "ag_oz_tc", "ag_gr_ton", "ag_fino",
     "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+]
+
+# NUEVO: tabla de "rechazados por baja rec" (stg + rec_class)
+REJ_TABLE = "stg_lotes_daily_rec"
+REJ_COLS = [
+    "codigo", "zona", "tmh", "humedad_pct", "tms",
+    "au_oz_tc", "au_gr_ton", "au_fino",
+    "ag_oz_tc", "ag_gr_ton", "ag_fino",
+    "cu_pct", "nacn_kg_t", "naoh_kg_t", "rec_pct",
+    "rec_class",
+    "loaded_at",
 ]
 
 # =========================
@@ -93,8 +104,32 @@ def prep_payload(df_out: pd.DataFrame) -> list[dict]:
     return payload
 
 
+def prep_payload_rej(df_rej: pd.DataFrame) -> list[dict]:
+    """
+    Para insertar en stg_lotes_daily_rec
+    """
+    if df_rej is None or df_rej.empty:
+        return []
+    d = df_rej.copy()
+
+    for c in REJ_COLS:
+        if c not in d.columns:
+            d[c] = None
+
+    d = d[REJ_COLS].replace({np.nan: None})
+    payload = d.to_dict(orient="records")
+    payload = [{k: _to_native(v) for k, v in row.items()} for row in payload]
+    return payload
+
+
 def delete_all(table_name: str):
+    # para tablas con id (res_pila_1/2/3)
     supabase.table(table_name).delete().neq("id", -1).execute()
+
+
+def delete_by_loaded_at(table_name: str):
+    # para tablas tipo staging sin id, con loaded_at
+    supabase.table(table_name).delete().gte("loaded_at", "1900-01-01T00:00:00Z").execute()
 
 
 def insert_chunks(table_name: str, payload: list[dict], chunk_size: int = 500) -> int:
@@ -192,7 +227,6 @@ def run_etl_from_sheets() -> dict:
     records = [{k: json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
 
     # 5) Borrar staging completo (MVP)
-    #    (misma lógica que tu script: usa loaded_at como filtro)
     supabase.table(STG_TABLE).delete().gte("loaded_at", "1900-01-01T00:00:00Z").execute()
 
     # 6) Insert por chunks
@@ -239,7 +273,7 @@ async def run(req: Request):
         payload = {}
 
     # 1) leer input
-    resp = supabase.table("stg_lotes_daily").select("*").execute()
+    resp = supabase.table(STG_TABLE).select("*").execute()
     rows = resp.data or []
     if not rows:
         return {"ok": False, "error": "stg_lotes_daily vacío"}
@@ -247,14 +281,16 @@ async def run(req: Request):
     df = pd.DataFrame(rows)
 
     # 2) correr solver (con payload opcional)
-    p1, p2, p3 = solve(df, payload)
+    #    AHORA: retorna 4 dataframes
+    p1, p2, p3, rej_lowrec = solve(df, payload)
 
     # 3) preparar payloads
     payload_1 = prep_payload(p1)
     payload_2 = prep_payload(p2)
     payload_3 = prep_payload(p3)
+    payload_rej = prep_payload_rej(rej_lowrec)
 
-    # 4) delete + insert
+    # 4) delete + insert (pila outputs)
     delete_all("res_pila_1")
     delete_all("res_pila_2")
     delete_all("res_pila_3")
@@ -263,8 +299,13 @@ async def run(req: Request):
     ins2 = insert_chunks("res_pila_2", payload_2)
     ins3 = insert_chunks("res_pila_3", payload_3)
 
+    # 5) delete + insert (rechazos por baja rec)
+    #    Nota: esta tabla NO tiene id, borramos por loaded_at.
+    delete_by_loaded_at(REJ_TABLE)
+    ins_rej = insert_chunks(REJ_TABLE, payload_rej)
+
     return {
         "ok": True,
-        "inserted": {"p1": ins1, "p2": ins2, "p3": ins3},
+        "inserted": {"p1": ins1, "p2": ins2, "p3": ins3, "rej_lowrec": ins_rej},
         "payload_used": payload,  # debug
     }

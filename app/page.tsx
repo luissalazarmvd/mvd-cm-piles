@@ -38,6 +38,9 @@ type LotRow = {
   naoh_kg_t?: number | string;
   rec_pct?: number | string;
 
+  // ✅ nuevo (solo Resultado 4)
+  rec_class?: string;
+
   loaded_at?: string;
   created_at?: string;
 };
@@ -111,7 +114,26 @@ const COLS = [
   "rec_pct",
 ] as const;
 
+const COLS_LOWREC = [
+  "nro",
+  "codigo",
+  "zona",
+  "tmh",
+  "humedad_pct",
+  "tms",
+  "au_gr_ton",
+  "au_fino",
+  "ag_gr_ton",
+  "ag_fino",
+  "cu_pct",
+  "nacn_kg_t",
+  "naoh_kg_t",
+  "rec_pct",
+  "rec_class",
+] as const;
+
 type ColKey = (typeof COLS)[number];
+type ColKeyLow = (typeof COLS_LOWREC)[number];
 
 const COL_LABEL: Record<ColKey, string> = {
   nro: "#",
@@ -128,6 +150,11 @@ const COL_LABEL: Record<ColKey, string> = {
   nacn_kg_t: "NaCN (kg/t)",
   naoh_kg_t: "NaOH (kg/t)",
   rec_pct: "Rec (%)",
+};
+
+const COL_LABEL_LOWREC: Record<ColKeyLow, string> = {
+  ...COL_LABEL,
+  rec_class: "Clasificación",
 };
 
 function DataTable({ rows }: { rows: LotRow[] }) {
@@ -253,7 +280,133 @@ function DataTable({ rows }: { rows: LotRow[] }) {
   );
 }
 
-type ViewKey = "1" | "2" | "3";
+function DataTableLowRec({ rows }: { rows: LotRow[] }) {
+  const tmsSum = rows.reduce((acc, r) => acc + n(r.tms), 0);
+  const tmhSum = rows.reduce((acc, r) => acc + n(r.tmh), 0);
+
+  const wSum = rows.reduce((acc, r) => acc + w(r), 0);
+  const wavg = (get: (r: LotRow) => number) => (wSum > 0 ? rows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0);
+
+  const humW = wavg((r) => n(r.humedad_pct));
+  const auW = wavg((r) => n(r.au_gr_ton));
+  const agW = wavg((r) => n(r.ag_gr_ton));
+  const cuW = wavg((r) => n(r.cu_pct));
+  const nacnW = wavg((r) => n(r.nacn_kg_t));
+  const naohW = wavg((r) => n(r.naoh_kg_t));
+  const recW = wavg((r) => n(r.rec_pct));
+
+  const auFinoSum = rows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = rows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+
+  const wrapStyle: React.CSSProperties = {
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,.25)",
+    overflow: "auto",
+    maxHeight: 420,
+    background: "rgba(0,0,0,.10)",
+  };
+
+  const thStyle: React.CSSProperties = {
+    textAlign: "left",
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,.2)",
+    whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+    zIndex: 3,
+    background: "rgba(0,0,0,.28)",
+    backdropFilter: "blur(6px)",
+  };
+
+  const tdStyle: React.CSSProperties = { padding: "8px 10px", whiteSpace: "nowrap" };
+
+  const tfootTd: React.CSSProperties = {
+    padding: "10px 10px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    position: "sticky",
+    bottom: 0,
+    zIndex: 2,
+    background: "rgba(0,0,0,.30)",
+    backdropFilter: "blur(6px)",
+    borderTop: "1px solid rgba(255,255,255,.25)",
+  };
+
+  return (
+    <div style={wrapStyle}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr>
+            {COLS_LOWREC.map((c) => (
+              <th key={c} style={thStyle}>
+                {COL_LABEL_LOWREC[c] ?? c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.id ?? i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+              <td style={tdStyle}>{i + 1}</td>
+              <td style={tdStyle}>{r.codigo ?? ""}</td>
+              <td style={tdStyle}>{r.zona ?? ""}</td>
+              <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
+              <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
+              <td style={tdStyle}>{fmt(r.tms, 2)}</td>
+              <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
+              <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
+              <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
+              <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+              <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
+              <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
+              <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
+              <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
+              <td style={tdStyle}>{r.rec_class ?? ""}</td>
+            </tr>
+          ))}
+
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={COLS_LOWREC.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
+                Sin datos.
+              </td>
+            </tr>
+          )}
+        </tbody>
+
+        {rows.length > 0 && (
+          <tfoot>
+            <tr>
+              <td style={tfootTd} />
+              <td style={tfootTd}>SUBTOTAL</td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>({rows.length} lotes)</td>
+
+              <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
+              <td style={tfootTd}>{fmt(humW, 2)}</td>
+              <td style={tfootTd}>{fmt(tmsSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(auW, 2)}</td>
+              <td style={tfootTd}>{fmt(auFinoSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(agW, 2)}</td>
+              <td style={tfootTd}>{fmt(agFinoSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(cuW, 2)}</td>
+              <td style={tfootTd}>{fmt(nacnW, 2)}</td>
+              <td style={tfootTd}>{fmt(naohW, 2)}</td>
+              <td style={tfootTd}>{fmt(recW, 2)}</td>
+
+              <td style={tfootTd} />
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
+type ViewKey = "1" | "2" | "3" | "4";
 
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
@@ -396,11 +549,7 @@ function ZoneDropdown({
   const allSelected = zones.length > 0 && selected.length === zones.length;
 
   const label =
-    zones.length === 0
-      ? "Cargando..."
-      : allSelected
-      ? `Todas (${zones.length})`
-      : `${selected.length} seleccionadas`;
+    zones.length === 0 ? "Cargando..." : allSelected ? `Todas (${zones.length})` : `${selected.length} seleccionadas`;
 
   return (
     <div ref={boxRef} style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 260 }}>
@@ -474,12 +623,7 @@ function ZoneDropdown({
                   cursor: "pointer",
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggle(z)}
-                  style={{ width: 16, height: 16 }}
-                />
+                <input type="checkbox" checked={checked} onChange={() => onToggle(z)} style={{ width: 16, height: 16 }} />
                 <span style={{ fontSize: 13 }}>{z}</span>
               </label>
             );
@@ -597,6 +741,28 @@ function totalsForExport(rows: LotRow[]) {
   };
 }
 
+function drawSignatures(doc: jsPDF, pageW: number, pageH: number, marginX: number, yLine: number) {
+  const colW = (pageW - marginX * 2) / 3;
+  const c1 = marginX + colW * 0.5;
+  const c2 = marginX + colW * 1.5;
+  const c3 = marginX + colW * 2.5;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+
+  const line = "-------------------------------";
+
+  const drawSigBlock = (cx: number, title1: string) => {
+    doc.text(line, cx, yLine, { align: "center" });
+    doc.text(title1, cx, yLine + 32, { align: "center" });
+    doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
+  };
+
+  drawSigBlock(c1, "Sub Gerencia de Planta");
+  drawSigBlock(c2, "Supervisión de Cancha");
+  drawSigBlock(c3, "Control de Minerales");
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -608,6 +774,7 @@ export default function Home() {
   const [r1, setR1] = useState<LotRow[]>([]);
   const [r2, setR2] = useState<LotRow[]>([]);
   const [r3, setR3] = useState<LotRow[]>([]);
+  const [r4, setR4] = useState<LotRow[]>([]); // ✅ baja recuperación
 
   const [view, setView] = useState<ViewKey>("1");
 
@@ -670,7 +837,6 @@ export default function Home() {
 
       // ✅ default: todas seleccionadas
       setZonesSelected((prev) => {
-        // si ya había selección, respétala SOLO si sigue existiendo
         if (prev && prev.length > 0) {
           const setZ = new Set(z);
           const filtered = prev.filter((x) => setZ.has(x));
@@ -687,55 +853,58 @@ export default function Home() {
   }
 
   async function runETL() {
-  setEtlLoading(true);
-  try {
-    const res = await fetch("/api/etl", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}), // no necesitas params por ahora
-    });
+    setEtlLoading(true);
+    try {
+      const res = await fetch("/api/etl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
 
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j?.error || "Error ejecutando ETL");
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error || "Error ejecutando ETL");
 
-    // refresca el universo / resultados (si quieres que se vea todo actualizado)
-    await loadAll();
+      await loadAll();
 
-    alert(`✅ Lotes cargados: ${j?.inserted ?? "OK"}`);
-  } catch (e: any) {
-    alert(`❌ ${e?.message || "Error"}`);
-  } finally {
-    setEtlLoading(false);
+      alert(`✅ Lotes cargados: ${j?.inserted ?? "OK"}`);
+    } catch (e: any) {
+      alert(`❌ ${e?.message || "Error"}`);
+    } finally {
+      setEtlLoading(false);
+    }
   }
-}
-
 
   async function loadAll() {
     setLoading(true);
     setLoadError("");
     try {
-      const [a, b, c] = await Promise.all([
+      const [a, b, c, d] = await Promise.all([
         fetch("/api/pilas?which=1", { cache: "no-store" }),
         fetch("/api/pilas?which=2", { cache: "no-store" }),
         fetch("/api/pilas?which=3", { cache: "no-store" }),
+        fetch("/api/pilas?which=4", { cache: "no-store" }), // ✅ baja rec
       ]);
 
       const ja = await a.json();
       const jb = await b.json();
       const jc = await c.json();
+      const jd = await d.json();
 
       if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
       if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
       if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
+      if (!d.ok) throw new Error(jd?.error || "Error cargando resultado 4");
 
       setR1(Array.isArray(ja?.rows) ? ja.rows : []);
       setR2(Array.isArray(jb?.rows) ? jb.rows : []);
       setR3(Array.isArray(jc?.rows) ? jc.rows : []);
+      setR4(Array.isArray(jd?.rows) ? jd.rows : []);
     } catch (e: any) {
       setLoadError(e?.message || "Error");
       setR1([]);
       setR2([]);
       setR3([]);
+      setR4([]);
     } finally {
       setLoading(false);
     }
@@ -748,7 +917,6 @@ export default function Home() {
       const payload = buildSolverPayload({
         zonesSelected,
         zonesAll,
-
         lot_tms_min,
         lot_rec_min,
         var_g_tries,
@@ -767,9 +935,14 @@ export default function Home() {
 
       await loadAll();
 
-      const inserted = j?.inserted;
-      if (inserted) setCalcMsg(`OK: p1=${inserted?.p1 ?? 0}, p2=${inserted?.p2 ?? 0}, p3=${inserted?.p3 ?? 0}`);
-      else setCalcMsg("OK");
+      const ins = j?.inserted;
+      if (ins) {
+        setCalcMsg(
+          `OK: p1=${ins?.p1 ?? 0}, p2=${ins?.p2 ?? 0}, p3=${ins?.p3 ?? 0}, baja_rec=${ins?.rej_lowrec ?? ins?.p4 ?? 0}`
+        );
+      } else {
+        setCalcMsg("OK");
+      }
     } catch (e: any) {
       setCalcMsg(`❌ ${e?.message || "Error"}`);
     } finally {
@@ -789,7 +962,7 @@ export default function Home() {
     setZonesSelected((prev) => {
       const has = prev.includes(z);
       if (has) {
-        if (prev.length <= 1) return prev; // no dejes 0
+        if (prev.length <= 1) return prev;
         return prev.filter((x) => x !== z);
       }
       return [...prev, z];
@@ -804,15 +977,17 @@ export default function Home() {
   const g2 = useMemo(() => groupByPile(r2), [r2]);
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
-  const current = view === "1" ? g1 : view === "2" ? g2 : g3;
-  const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : r3;
+  const current = view === "1" ? g1 : view === "2" ? g2 : view === "3" ? g3 : [];
+  const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : view === "3" ? r3 : r4;
 
   const viewTitle =
     view === "1"
       ? "Resultado 1 – 1 pila Varios"
       : view === "2"
       ? "Resultado 2 – Pilas Batch"
-      : "Resultado 3 – Mixto (1 Varios + 1 Batch)";
+      : view === "3"
+      ? "Resultado 3 – Mixto (1 Varios + 1 Batch)"
+      : "Resultado 4 – Baja Recuperación";
 
   const tabBtn = (k: ViewKey, label: string) => {
     const active = view === k;
@@ -836,16 +1011,10 @@ export default function Home() {
     );
   };
 
-  // ✅ EXPORT PDF (solo la vista seleccionada: 1,2 o 3)
+  // ✅ EXPORT PDF (solo la vista seleccionada: 1,2,3 o 4)
   async function exportCurrentToPDF() {
     setExportLoading(true);
     try {
-      const piles = current;
-      if (!piles || piles.length === 0) {
-        alert("Sin datos para exportar.");
-        return;
-      }
-
       const pileDate = getPileDateFromRows(flatCurrentRows);
       const dateStr = formatDDMMYYYY(pileDate);
 
@@ -884,6 +1053,118 @@ export default function Home() {
         doc.line(marginX, headerH, pageW - marginX, headerH);
       };
 
+      // ====== Caso: Resultado 4 (una sola tabla) ======
+      if (view === "4") {
+        if (!r4 || r4.length === 0) {
+          alert("Sin datos para exportar.");
+          return;
+        }
+
+        drawHeader();
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("Baja Recuperación", marginX, headerH + 22);
+
+        const head = [COLS_LOWREC.map((c) => COL_LABEL_LOWREC[c as ColKeyLow] ?? c)];
+
+        const body = r4.map((r, i) => [
+          String(i + 1),
+          r.codigo ?? "",
+          r.zona ?? "",
+          fmt(r.tmh, 2),
+          fmt(r.humedad_pct, 2),
+          fmt(r.tms, 2),
+          fmt(r.au_gr_ton, 2),
+          fmt(r.au_fino, 2),
+          fmt(r.ag_gr_ton, 2),
+          fmt(r.ag_fino, 2),
+          fmt(r.cu_pct, 2),
+          fmt(r.nacn_kg_t, 2),
+          fmt(r.naoh_kg_t, 2),
+          fmt(r.rec_pct, 2),
+          r.rec_class ?? "",
+        ]);
+
+        const tot = totalsForExport(r4);
+
+        autoTable(doc, {
+          head,
+          body,
+          foot: [
+            [
+              "",
+              "SUBTOTAL",
+              `(${r4.length} lotes)`,
+              fmt(tot.tmhSum, 2),
+              fmt(tot.humW, 2),
+              fmt(tot.tmsSum, 2),
+              fmt(tot.auW, 2),
+              fmt(tot.auFinoSum, 2),
+              fmt(tot.agW, 2),
+              fmt(tot.agFinoSum, 2),
+              fmt(tot.cuW, 2),
+              fmt(tot.nacnW, 2),
+              fmt(tot.naohW, 2),
+              fmt(tot.recW, 2),
+              "",
+            ],
+          ],
+          showFoot: "lastPage",
+          startY: headerH + 36,
+          margin: { left: marginX, right: marginX },
+          theme: "grid",
+          styles: {
+            font: "helvetica",
+            fontSize: 8,
+            cellPadding: 3,
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
+          headStyles: {
+            fillColor: [0, 103, 172],
+            textColor: [255, 255, 255],
+            fontStyle: "bold",
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
+          footStyles: {
+            fillColor: [255, 255, 255],
+            textColor: [0, 103, 172],
+            fontStyle: "bold",
+            lineWidth: 0.6,
+            lineColor: [180, 180, 180],
+          },
+        });
+
+        // ✅ firmas debajo del final de ESTA tabla (en la última página)
+        let lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+
+        const needH = 120;
+        const footerTopYMin = pageH - needH;
+        if (lastY > footerTopYMin) {
+          doc.addPage();
+          drawHeader();
+          lastY = headerH + 20;
+        }
+
+        const yLine = Math.max(lastY + 24, pageH - 95);
+        drawSignatures(doc, pageW, pageH, marginX, yLine);
+
+        const fname = `Export_BajaRec_${dateStr.replaceAll("/", "-")}.pdf`;
+        doc.save(fname);
+        return;
+      }
+
+      // ====== Caso: Resultados 1/2/3 (tablas por pila) ======
+      const piles = current;
+      if (!piles || piles.length === 0) {
+        alert("Sin datos para exportar.");
+        return;
+      }
+
+      const head = [COLS.map((c) => COL_LABEL[c as ColKey] ?? c)];
+
       const makeBodyRows = (rows: LotRow[]) =>
         rows.map((r, i) => [
           String(i + 1),
@@ -901,8 +1182,6 @@ export default function Home() {
           fmt(r.naoh_kg_t, 2),
           fmt(r.rec_pct, 2),
         ]);
-
-      const head = [COLS.map((c) => COL_LABEL[c] ?? c)];
 
       piles.forEach((p, idx) => {
         if (idx > 0) doc.addPage();
@@ -927,7 +1206,6 @@ export default function Home() {
         autoTable(doc, {
           head,
           body: makeBodyRows(p.lotes),
-
           foot: [
             [
               "",
@@ -946,12 +1224,9 @@ export default function Home() {
               fmt(tot.recW, 2),
             ],
           ],
-
           showFoot: "lastPage",
-
           startY: headerH + 48,
           margin: { left: marginX, right: marginX },
-
           theme: "grid",
           styles: {
             font: "helvetica",
@@ -960,7 +1235,6 @@ export default function Home() {
             lineWidth: 0.6,
             lineColor: [180, 180, 180],
           },
-
           headStyles: {
             fillColor: [0, 103, 172],
             textColor: [255, 255, 255],
@@ -968,7 +1242,6 @@ export default function Home() {
             lineWidth: 0.6,
             lineColor: [180, 180, 180],
           },
-
           footStyles: {
             fillColor: [255, 255, 255],
             textColor: [0, 103, 172],
@@ -977,37 +1250,30 @@ export default function Home() {
             lineColor: [180, 180, 180],
           },
         });
+
+        // ✅ firmas debajo del final de CADA tabla (por pila)
+        let lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+
+        const needH = 120;
+        const footerTopYMin = pageH - needH;
+
+        if (lastY > footerTopYMin) {
+          doc.addPage();
+          drawHeader();
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(`Firmas – Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
+          lastY = headerH + 28;
+        }
+
+        const yLine = Math.max(lastY + 24, pageH - 95);
+        drawSignatures(doc, pageW, pageH, marginX, yLine);
       });
 
-      // ✅ Footer firmas solo en la última hoja del PDF
-      const lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
-      const footerNeedH = 120;
-      const footerTopYMin = pageH - footerNeedH;
-
-      if (lastY > footerTopYMin) doc.addPage();
-
-      const yLine = pageH - 95;
-      const colW = (pageW - marginX * 2) / 3;
-      const c1 = marginX + colW * 0.5;
-      const c2 = marginX + colW * 1.5;
-      const c3 = marginX + colW * 2.5;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-
-      const line = "-------------------------------";
-
-      const drawSigBlock = (cx: number, title1: string) => {
-        doc.text(line, cx, yLine, { align: "center" });
-        doc.text(title1, cx, yLine + 32, { align: "center" });
-        doc.text("Minera Veta Dorada S.A.C.", cx, yLine + 46, { align: "center" });
-      };
-
-      drawSigBlock(c1, "Sub Gerencia de Planta");
-      drawSigBlock(c2, "Supervisión de Cancha");
-      drawSigBlock(c3, "Control de Minerales");
-
-      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
+      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll(
+        "/",
+        "-"
+      )}.pdf`;
       doc.save(fname);
     } catch (e: any) {
       alert(e?.message || "Error exportando");
@@ -1103,22 +1369,22 @@ export default function Home() {
           </button>
 
           <button
-    onClick={runETL}
-    disabled={etlLoading}
-    style={{
-      padding: "8px 12px",
-      borderRadius: 8,
-      border: "none",
-      background: "#A7D8FF",
-      color: "#003A63",
-      fontWeight: "bold",
-      cursor: etlLoading ? "not-allowed" : "pointer",
-      whiteSpace: "nowrap",
-    }}
-    title="Carga stg_lotes_daily desde Google Sheets"
-  >
-    {etlLoading ? "Cargando..." : "Cargar lotes"}
-  </button>
+            onClick={runETL}
+            disabled={etlLoading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: etlLoading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+            title="Carga stg_lotes_daily desde Google Sheets"
+          >
+            {etlLoading ? "Cargando..." : "Cargar lotes"}
+          </button>
 
           <button
             onClick={exportCurrentToPDF}
@@ -1243,12 +1509,7 @@ export default function Home() {
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
           {/* ✅ PRIMERO: selector de ZONAS */}
-          <ZoneDropdown
-            zones={zonesAll}
-            selected={zonesSelected}
-            onToggle={toggleZone}
-            onSelectAll={selectAllZones}
-          />
+          <ZoneDropdown zones={zonesAll} selected={zonesSelected} onToggle={toggleZone} onSelectAll={selectAllZones} />
 
           <InputRow
             label="TMS mínimo de Lote"
@@ -1288,6 +1549,7 @@ export default function Home() {
         {tabBtn("1", "Resultado 1")}
         {tabBtn("2", "Resultado 2")}
         {tabBtn("3", "Resultado 3")}
+        {tabBtn("4", "Baja Recuperación")}
       </div>
 
       {loadError && <p style={{ color: "#FFD6D6", margin: "8px 0 14px 0" }}>❌ {loadError}</p>}
@@ -1295,35 +1557,58 @@ export default function Home() {
       <section style={{ marginBottom: 22 }}>
         <h2 style={{ margin: "0 0 10px 0" }}>{viewTitle}</h2>
 
-        {current.map(({ pile_code, pile_type, lotes }) => {
-          const k = pileKPIs(lotes);
-          return (
-            <div
-              key={`${pile_code}-${pile_type}`}
-              style={{
-                marginBottom: 14,
-                background: "#004F86",
-                padding: 12,
-                borderRadius: 10,
-                border: "1px solid rgba(255,255,255,.12)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                <b>
-                  Pila #{pile_code} ({pile_type})
-                </b>
-
-                <span style={{ color: "rgba(255,255,255,.85)" }}>
-                  TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
-                </span>
-              </div>
-
-              <DataTable rows={lotes} />
+        {/* ✅ Resultado 4 */}
+        {view === "4" && (
+          <div
+            style={{
+              marginBottom: 14,
+              background: "#004F86",
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,.12)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+              <b>Baja Recuperación</b>
+              <span style={{ color: "rgba(255,255,255,.85)" }}>({r4.length} lotes)</span>
             </div>
-          );
-        })}
 
-        {current.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
+            <DataTableLowRec rows={r4} />
+          </div>
+        )}
+
+        {/* ✅ Resultados 1/2/3 */}
+        {view !== "4" &&
+          current.map(({ pile_code, pile_type, lotes }) => {
+            const k = pileKPIs(lotes);
+            return (
+              <div
+                key={`${pile_code}-${pile_type}`}
+                style={{
+                  marginBottom: 14,
+                  background: "#004F86",
+                  padding: 12,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,.12)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+                  <b>
+                    Pila #{pile_code} ({pile_type})
+                  </b>
+
+                  <span style={{ color: "rgba(255,255,255,.85)" }}>
+                    TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
+                  </span>
+                </div>
+
+                <DataTable rows={lotes} />
+              </div>
+            );
+          })}
+
+        {view !== "4" && current.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
+        {view === "4" && r4.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>
     </main>
   );

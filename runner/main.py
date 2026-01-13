@@ -254,6 +254,13 @@ def run_etl_from_sheets() -> dict:
     df["zona"] = df["zona"].astype(str).str.strip()
     df = df[df["codigo"].notna() & (df["codigo"] != "")].copy()
 
+    # 3.5) ✅ DEDUP
+    # A) Borra filas idénticas (todas las columnas iguales)
+    df = df.drop_duplicates(subset=ETL_COLS, keep="first").copy()
+
+    # B) Si se repite código con valores distintos, quédate con la primera (arriba)
+    df = df.drop_duplicates(subset=["codigo"], keep="first").copy()
+
     # 4) JSON-safe records
     records = [{k: json_safe(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
 

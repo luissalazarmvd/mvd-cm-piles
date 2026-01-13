@@ -309,7 +309,7 @@ def _classify_rec_series(rec: pd.Series) -> pd.Series:
 # =========================
 def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if df is None or df.empty:
-        return pd.DataFrameلاحظ
+        return pd.DataFrame()
 
     d = df.copy()
 
@@ -498,6 +498,147 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
     if x > hi:
         return x - hi
     return 0.0
+
+
+# =========================
+# TOP-UP (relleno sin romper parámetros finales)
+# =========================
+def _pile_totals(d: pd.DataFrame) -> dict:
+    tms = pd.to_numeric(d["tms"], errors="coerce").fillna(0).astype(float)
+    g   = pd.to_numeric(d["au_gr_ton"], errors="coerce").fillna(0).astype(float)
+    r   = pd.to_numeric(d["rec_pct"], errors="coerce").fillna(0).astype(float)
+
+    cn  = pd.to_numeric(d.get("nacn_kg_t", np.nan), errors="coerce").astype(float)
+    oh  = pd.to_numeric(d.get("naoh_kg_t", np.nan), errors="coerce").astype(float)
+
+    gtms  = float((g * tms).sum())
+    rtms  = float((r * tms).sum())
+    cntms = float((cn.fillna(0) * tms).sum())
+    ohtms = float((oh.fillna(0) * tms).sum())
+
+    return {"tms": float(tms.sum()), "gtms": gtms, "rtms": rtms, "cntms": cntms, "ohtms": ohtms}
+
+
+def top_up_pile(
+    pile: pd.DataFrame,
+    pool: pd.DataFrame,
+    *,
+    tms_max: float,
+    gmin: float,
+    gmax: float,
+    gmin_exclusive: bool,
+    gmax_inclusive: bool,
+    rec_min: float,
+    enforce_reagents: bool,
+    reag_min: float,
+    reag_max: float,
+) -> pd.DataFrame:
+    """
+    Agrega lotes extra hasta tms_max SIN romper:
+    - rec_avg >= rec_min
+    - ley_avg dentro de banda
+    - reagentes dentro banda si enforce_reagents
+    """
+    if pile is None or pile.empty or pool is None or pool.empty:
+        return pile
+
+    p = pile.copy()
+    q = pool.copy()
+
+    need = ["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff", "nacn_kg_t", "naoh_kg_t", "au_fino"]
+    for c in need:
+        if c not in q.columns:
+            q[c] = np.nan
+
+    q = q.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    q["tms"] = pd.to_numeric(q["tms"], errors="coerce")
+    q["tmh_eff"] = pd.to_numeric(q["tmh_eff"], errors="coerce")
+    q = q[(q["tms"] > 0) & (q["tmh_eff"] > 0)].copy()
+
+    if enforce_reagents:
+        q = q.dropna(subset=["nacn_kg_t", "naoh_kg_t"]).copy()
+
+    if q.empty:
+        return p
+
+    used = set(p["codigo"].astype(str).tolist())
+    q = q[~q["codigo"].astype(str).isin(used)].copy()
+    if q.empty:
+        return p
+
+    # score: prioriza finos (au_fino si existe, sino g*tms), pero castiga rec muy baja
+    q["_tms"] = pd.to_numeric(q["tms"], errors="coerce").fillna(0).astype(float)
+    q["_g"]   = pd.to_numeric(q["au_gr_ton"], errors="coerce").fillna(0).astype(float)
+    q["_r"]   = pd.to_numeric(q["rec_pct"], errors="coerce").fillna(0).astype(float)
+    q["_cn"]  = pd.to_numeric(q["nacn_kg_t"], errors="coerce").astype(float)
+    q["_oh"]  = pd.to_numeric(q["naoh_kg_t"], errors="coerce").astype(float)
+
+    q["_fine"] = pd.to_numeric(q["au_fino"], errors="coerce")
+    q["_fine"] = q["_fine"].where(q["_fine"].notna(), q["_g"] * q["_tms"]).fillna(0.0)
+
+    q["_rec_gap"] = np.maximum(0.0, rec_min - q["_r"])
+    q["_score"] = q["_fine"] - (q["_rec_gap"] * 1e6)  # castigo fuerte si se aleja del rec_min
+    q = q.sort_values(by=["_score"], ascending=False).reset_index(drop=True)
+
+    tot = _pile_totals(p)
+
+    def _avg_ok(new_tms, new_gtms, new_rtms, new_cntms, new_ohtms) -> bool:
+        if new_tms <= 0 or new_tms > tms_max + 1e-9:
+            return False
+        g_avg = new_gtms / new_tms
+        r_avg = new_rtms / new_tms
+        if not grade_ok(g_avg, gmin, gmax, gmin_exclusive, gmax_inclusive):
+            return False
+        if r_avg < rec_min - 1e-9:
+            return False
+        if enforce_reagents:
+            cn_avg = new_cntms / new_tms
+            oh_avg = new_ohtms / new_tms
+            if (not reag_ok(cn_avg, reag_min, reag_max)) or (not reag_ok(oh_avg, reag_min, reag_max)):
+                return False
+        return True
+
+    picked_rows = []
+
+    for _, row in q.iterrows():
+        if tot["tms"] >= tms_max - 1e-9:
+            break
+
+        add_tms = float(row["_tms"])
+        if add_tms <= 0:
+            continue
+        if tot["tms"] + add_tms > tms_max + 1e-9:
+            continue
+
+        add_gtms = float(row["_g"]) * add_tms
+        add_rtms = float(row["_r"]) * add_tms
+
+        add_cntms = float(row["_cn"]) * add_tms if (enforce_reagents and math.isfinite(row["_cn"])) else 0.0
+        add_ohtms = float(row["_oh"]) * add_tms if (enforce_reagents and math.isfinite(row["_oh"])) else 0.0
+
+        new_tms = tot["tms"] + add_tms
+        new_gtms = tot["gtms"] + add_gtms
+        new_rtms = tot["rtms"] + add_rtms
+        new_cntms = tot["cntms"] + add_cntms
+        new_ohtms = tot["ohtms"] + add_ohtms
+
+        if not _avg_ok(new_tms, new_gtms, new_rtms, new_cntms, new_ohtms):
+            continue
+
+        picked_rows.append(row)
+        tot["tms"] = new_tms
+        tot["gtms"] = new_gtms
+        tot["rtms"] = new_rtms
+        tot["cntms"] = new_cntms
+        tot["ohtms"] = new_ohtms
+
+    if not picked_rows:
+        return p
+
+    drop_cols = [c for c in q.columns if isinstance(c, str) and c.startswith("_")]
+    add_df = pd.DataFrame(picked_rows).drop(columns=drop_cols, errors="ignore")
+    out = pd.concat([p, add_df], ignore_index=True)
+    return out
 
 
 # =========================
@@ -700,6 +841,22 @@ def build_varios_trim(
         return pd.DataFrame()
 
     out["pile_type"] = "varios"
+
+    # ✅ TOP-UP: rellena sin romper parámetros finales (hasta tms_max)
+    out = top_up_pile(
+        pile=out,
+        pool=d,  # mismo universo que usaste para el trim
+        tms_max=tms_max,
+        gmin=gmin,
+        gmax=gmax,
+        gmin_exclusive=False,
+        gmax_inclusive=True,
+        rec_min=rec_min,
+        enforce_reagents=enforce_reagents,
+        reag_min=reag_min,
+        reag_max=reag_max,
+    )
+
     return out
 
 
@@ -807,6 +964,14 @@ def solve_one_pile(
         d = d.dropna(subset=["nacn_kg_t", "naoh_kg_t"]).copy()
         if d.empty:
             return pd.DataFrame()
+
+    # au_fino para scoring / key
+    if "au_fino" not in d.columns:
+        d["au_fino"] = np.nan
+    d["au_fino"] = pd.to_numeric(d["au_fino"], errors="coerce")
+    mask_auf = d["au_fino"].isna()
+    d.loc[mask_auf, "au_fino"] = pd.to_numeric(d.loc[mask_auf, "au_gr_ton"], errors="coerce") * pd.to_numeric(d.loc[mask_auf, "tms"], errors="coerce")
+    d["au_fino"] = d["au_fino"].fillna(0.0)
 
     d["is_lowrec"] = (d["rec_pct"] < rec_min).astype(int)
     base = d.sort_values(
@@ -1063,6 +1228,22 @@ def solve_one_pile(
 
     best_sol = best_sol.copy()
     best_sol["pile_type"] = pile_type
+
+    # ✅ TOP-UP: rellena sin romper parámetros finales (hasta tms_max)
+    best_sol = top_up_pile(
+        pile=best_sol,
+        pool=base.drop(columns=["is_lowrec"], errors="ignore"),
+        tms_max=tms_max,
+        gmin=gmin,
+        gmax=gmax,
+        gmin_exclusive=gmin_exclusive,
+        gmax_inclusive=gmax_inclusive,
+        rec_min=rec_min,
+        enforce_reagents=enforce_reagents,
+        reag_min=reag_min,
+        reag_max=reag_max,
+    )
+
     return best_sol
 
 
@@ -1097,7 +1278,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             tms_target=float(params["bat_tms_target"]),
             tms_min=float(params["bat_tms_min"]),
             gmin=float(params["bat_pile_g_min"]),
-            gmax=1e9,
+            gmax=float(params.get("bat_pile_g_max", 1e9)),
             gmin_exclusive=False,
             gmax_inclusive=True,
             rec_min=pile_rec_min,
@@ -1122,7 +1303,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             tms_target=float(params["bat_tms_target"]),
             tms_min=float(params["bat_tms_min"]),
             gmin=float(params["bat_pile_g_min"]),
-            gmax=1e9,
+            gmax=float(params.get("bat_pile_g_max", 1e9)),
             gmin_exclusive=False,
             gmax_inclusive=True,
             rec_min=pile_rec_min,
@@ -1167,12 +1348,12 @@ def solve(
     if df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), rej_lowrec
 
-    # OUTPUT 1: 1 pila varios (2 etapas ya dentro)
+    # OUTPUT 1: 1 pila varios
     p1 = build_varios(df, params).copy()
     if not p1.empty:
         p1["pile_code"] = 1
 
-    # OUTPUT 2: N pilas batch (cada batch con 2 etapas ya dentro)
+    # OUTPUT 2: N pilas batch
     remaining = df.copy()
     batch_piles = []
     pile_idx = 1
@@ -1192,7 +1373,7 @@ def solve(
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
-    # OUTPUT 3: mix (varios + batch) usando mismo df, con 2 etapas en ambos
+    # OUTPUT 3: mix (varios + batch)
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()

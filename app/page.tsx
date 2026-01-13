@@ -875,40 +875,57 @@ export default function Home() {
   }
 
   async function loadAll() {
-    setLoading(true);
-    setLoadError("");
+  setLoading(true);
+  setLoadError("");
+
+  try {
+    // 1) Siempre intenta cargar 1..3 (críticos)
+    const [a, b, c] = await Promise.all([
+      fetch("/api/pilas?which=1", { cache: "no-store" }),
+      fetch("/api/pilas?which=2", { cache: "no-store" }),
+      fetch("/api/pilas?which=3", { cache: "no-store" }),
+    ]);
+
+    const ja = await a.json().catch(() => ({}));
+    const jb = await b.json().catch(() => ({}));
+    const jc = await c.json().catch(() => ({}));
+
+    if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
+    if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
+    if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
+
+    setR1(Array.isArray(ja?.rows) ? ja.rows : []);
+    setR2(Array.isArray(jb?.rows) ? jb.rows : []);
+    setR3(Array.isArray(jc?.rows) ? jc.rows : []);
+
+    // 2) Resultado 4 (NO crítico): si falla, NO borres los otros
     try {
-      const [a, b, c, d] = await Promise.all([
-        fetch("/api/pilas?which=1", { cache: "no-store" }),
-        fetch("/api/pilas?which=2", { cache: "no-store" }),
-        fetch("/api/pilas?which=3", { cache: "no-store" }),
-        fetch("/api/pilas?which=4", { cache: "no-store" }), // ✅ baja rec
-      ]);
-
-      const ja = await a.json();
-      const jb = await b.json();
-      const jc = await c.json();
-      const jd = await d.json();
-
-      if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
-      if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
-      if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
-      if (!d.ok) throw new Error(jd?.error || "Error cargando resultado 4");
-
-      setR1(Array.isArray(ja?.rows) ? ja.rows : []);
-      setR2(Array.isArray(jb?.rows) ? jb.rows : []);
-      setR3(Array.isArray(jc?.rows) ? jc.rows : []);
-      setR4(Array.isArray(jd?.rows) ? jd.rows : []);
-    } catch (e: any) {
-      setLoadError(e?.message || "Error");
-      setR1([]);
-      setR2([]);
-      setR3([]);
+      const d = await fetch("/api/pilas?which=4", { cache: "no-store" });
+      const jd = await d.json().catch(() => ({}));
+      if (!d.ok) {
+        // backend aún no soporta which=4 -> NO tumbar todo
+        setR4([]);
+        // opcional: mostrar aviso suave (o comenta esta línea)
+        // setLoadError(jd?.error || "Resultado 4 no disponible");
+      } else {
+        setR4(Array.isArray(jd?.rows) ? jd.rows : []);
+      }
+    } catch {
       setR4([]);
-    } finally {
-      setLoading(false);
+      // opcional: setLoadError("Resultado 4 no disponible");
     }
+  } catch (e: any) {
+    // Si falla 1..3 recién ahí sí es crítico
+    setLoadError(e?.message || "Error");
+    setR1([]);
+    setR2([]);
+    setR3([]);
+    setR4([]);
+  } finally {
+    setLoading(false);
   }
+}
+
 
   async function runSolver() {
     setCalcLoading(true);

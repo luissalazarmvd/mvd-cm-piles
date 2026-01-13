@@ -8,18 +8,13 @@ function getTable(which: string | null) {
   if (which === "1") return "res_pila_1";
   if (which === "2") return "res_pila_2";
   if (which === "3") return "res_pila_3";
+  if (which === "4") return "res_pila_4"; // ✅ baja recuperación
   return null;
 }
 
 function getSupabaseEnv() {
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL;
-
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_KEY;
-
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   return { url, key };
 }
 
@@ -27,8 +22,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const which = searchParams.get("which");
 
-  if (!which || !["1", "2", "3"].includes(which)) {
-    return NextResponse.json({ error: "which debe ser 1, 2 o 3" }, { status: 400 });
+  // ✅ ahora acepta 1..4
+  if (!which || !["1", "2", "3", "4"].includes(which)) {
+    return NextResponse.json({ error: "which debe ser 1, 2, 3 o 4" }, { status: 400 });
   }
 
   const table = getTable(which);
@@ -45,31 +41,24 @@ export async function GET(req: Request) {
   }
 
   try {
-    const supabase = createClient(url, key, {
-      auth: { persistSession: false },
-    });
+    const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .order("pile_code", { ascending: true })
-      .order("id", { ascending: true });
+    // ✅ Resultado 4 no necesariamente tiene pile_code (o puede ser null)
+    // Entonces: orden condicional
+    let q = supabase.from(table).select("*").order("id", { ascending: true });
+
+    if (which !== "4") {
+      q = supabase.from(table).select("*").order("pile_code", { ascending: true }).order("id", { ascending: true });
+    }
+
+    const { data, error } = await q;
 
     if (error) {
-      return NextResponse.json(
-        { error: "Error leyendo Supabase", details: error.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Error leyendo Supabase", details: error.message }, { status: 500 });
     }
 
     const rows = data ?? [];
-
-    return NextResponse.json({
-      which,
-      table,
-      count: rows.length,
-      rows,
-    });
+    return NextResponse.json({ which, table, count: rows.length, rows });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Error" }, { status: 500 });
   }

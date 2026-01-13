@@ -8,7 +8,7 @@ function getTable(which: string | null) {
   if (which === "1") return "res_pila_1";
   if (which === "2") return "res_pila_2";
   if (which === "3") return "res_pila_3";
-  if (which === "4") return "res_pila_4"; // ✅ baja recuperación
+  if (which === "4") return "stg_lotes_daily_rec";
   return null;
 }
 

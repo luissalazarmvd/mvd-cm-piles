@@ -1,50 +1,26 @@
-# runner/solver.py
 import math
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
 
-# =========================
-# DEFAULTS (misma lógica que tu script funcional)
-# AHORA: tamaño/targets por TMS (no TMH)
-# + Filtro de ZONAS (por defecto: todas)
-# =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
-    # filtros / restricciones
-    "lot_rec_min": 85.0,      # filtro duro por lote (para entrar al solver)
-    "pile_rec_min": 85.0,     # rec ponderada de pila >= 85
-    "lot_tms_min": 0.0,       # TMS mínima por lote (0 = no filtra)
-
-    # zonas:
-    # - None => no filtra (equivale a "todas las zonas")
-    # - lista no vacía => filtra solo esas zonas
+    "lot_rec_min": 85.0,
+    "pile_rec_min": 85.0,
+    "lot_tms_min": 0.0,
     "zones": None,
-
-    # VARIOS (TMS)
     "var_tms_max": 550.0,
     "var_tms_target": 550.0,
     "var_tms_min": 250.0,
     "var_g_tries": [(20.0, 24.0), (19.5, 24.0), (19.0, 24.0)],
-
-    # BATCH (TMS)
     "bat_tms_max": 120.0,
     "bat_tms_target": 120.0,
     "bat_tms_min": 80.0,
-
-    # IMPORTANTE:
-    # - bat_lot_g_min ahora por defecto NO filtra (porque batch debe armarse por ley de pila).
-    # - Si algún día quieres volver a filtrar lotes por ley, súbelo > 0 desde UI.
     "bat_lot_g_min": 0.0,
-
     "bat_pile_g_min": 30.0,
     "bat_pile_g_max": 1e9,
-
-    # REAGENTES (ponderados por TMS en pila)
     "reag_min": 4.0,
     "reag_max": 8.0,
-
-    # knobs solver batch
     "batch_n_iters_hard": 900,
     "batch_n_iters_soft": 1400,
     "batch_max_steps": 600,
@@ -52,15 +28,10 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "batch_reseeds": 2,
     "batch_pair_topk": 10,
     "batch_pair_pool": 16,
-
-    # semillas
     "seed_batch_base": 100,
     "seed_mix_batch": 888,
 }
 
-# =========================
-# Helpers parse params
-# =========================
 def _to_float(x: Any, default: float) -> float:
     try:
         v = float(x)
@@ -77,13 +48,6 @@ def _to_int(x: Any, default: int) -> int:
         return default
 
 def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-    """
-    Acepta:
-    - [[gmin,gmax], [gmin,gmax], ...]
-    - (gmin,gmax)
-    - {"gmin":..,"gmax":..}
-    Si viene inválido => default
-    """
     if x is None:
         return default
 
@@ -136,13 +100,6 @@ def _normalize_zone_str(x: Any) -> str:
         return ""
 
 def _parse_str_list(x: Any) -> Optional[List[str]]:
-    """
-    Acepta:
-    - None => None
-    - ["Z1","Z2"] => lista normalizada
-    - "Z1,Z2" => lista normalizada
-    - "" o [] => None (equivale a "todas")
-    """
     if x is None:
         return None
 
@@ -173,19 +130,6 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
     return uniq if len(uniq) > 0 else None
 
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    payload puede venir de UI (req.json()).
-
-    Soporta:
-    - flat keys (compat)
-    - nested: payload.filters / payload.varios / payload.batch / payload.reagents / payload.seeds / payload.knobs
-
-    Cambios:
-    - Targets/capacidad por TMS: var_tms_* y bat_tms_*.
-    - Filtro min por lote: lot_tms_min.
-    - + Filtro por zonas: zones (por defecto None => todas)
-    - Mantiene compat con llaves antiguas tmh_* (si llegan, se mapean a tms_*).
-    """
     p = dict(DEFAULT_PARAMS)
 
     if not payload or not isinstance(payload, dict):
@@ -239,9 +183,12 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(payload.get("varios"), dict):
         v = payload["varios"]
 
-        if "var_tmh_max" in v and "var_tms_max" not in v: v["var_tms_max"] = v.get("var_tmh_max")
-        if "var_tmh_target" in v and "var_tms_target" not in v: v["var_tms_target"] = v.get("var_tmh_target")
-        if "var_tmh_min" in v and "var_tms_min" not in v: v["var_tms_min"] = v.get("var_tmh_min")
+        if "var_tmh_max" in v and "var_tms_max" not in v:
+            v["var_tms_max"] = v.get("var_tmh_max")
+        if "var_tmh_target" in v and "var_tms_target" not in v:
+            v["var_tms_target"] = v.get("var_tmh_target")
+        if "var_tmh_min" in v and "var_tms_min" not in v:
+            v["var_tms_min"] = v.get("var_tmh_min")
 
         for k in ["var_tms_max", "var_tms_target", "var_tms_min"]:
             if k in v:
@@ -252,9 +199,12 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(payload.get("batch"), dict):
         b = payload["batch"]
 
-        if "bat_tmh_max" in b and "bat_tms_max" not in b: b["bat_tms_max"] = b.get("bat_tmh_max")
-        if "bat_tmh_target" in b and "bat_tms_target" not in b: b["bat_tms_target"] = b.get("bat_tmh_target")
-        if "bat_tmh_min" in b and "bat_tms_min" not in b: b["bat_tms_min"] = b.get("bat_tmh_min")
+        if "bat_tmh_max" in b and "bat_tms_max" not in b:
+            b["bat_tms_max"] = b.get("bat_tmh_max")
+        if "bat_tmh_target" in b and "bat_tms_target" not in b:
+            b["bat_tms_target"] = b.get("bat_tmh_target")
+        if "bat_tmh_min" in b and "bat_tms_min" not in b:
+            b["bat_tms_min"] = b.get("bat_tmh_min")
 
         for k in ["bat_tms_max", "bat_tms_target", "bat_tms_min", "bat_lot_g_min", "bat_pile_g_min", "bat_pile_g_max"]:
             if k in b:
@@ -317,11 +267,7 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     return p
 
-
-# =========================
-# Rechazos por baja recuperación (para la nueva tabla)
-# =========================
-REJ_REC_CEIL = 85.0  # solo candidatos a la tabla de "no usados por baja rec" si rec_pct < 85
+REJ_REC_CEIL = 85.0
 
 def _classify_rec_series(rec: pd.Series) -> pd.Series:
     r = pd.to_numeric(rec, errors="coerce")
@@ -334,22 +280,7 @@ def _classify_rec_series(rec: pd.Series) -> pd.Series:
     out = np.select(conds, choices, default=None)
     return pd.Series(out, index=rec.index, dtype="object")
 
-
-# =========================
-# 1) PREP DATA (base común)
-# =========================
 def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Limpieza base común (sin filtrar por rec).
-    Mantiene:
-      - último loaded_at
-      - coerciones numéricas
-      - cálculo tms si falta
-      - tmh_eff
-      - finos si faltan
-      - filtros mínimos: codigo, au_gr_ton, rec_pct, tms>0, tmh_eff>0, lot_tms_min
-      - filtro por zones si aplica
-    """
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -370,17 +301,17 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
-    # asegurar columnas
     if "zona" not in d.columns:
         d["zona"] = np.nan
-    if "tms" not in d.columns: d["tms"] = np.nan
-    if "tmh" not in d.columns: d["tmh"] = np.nan
-    if "humedad_pct" not in d.columns: d["humedad_pct"] = np.nan
+    if "tms" not in d.columns:
+        d["tms"] = np.nan
+    if "tmh" not in d.columns:
+        d["tmh"] = np.nan
+    if "humedad_pct" not in d.columns:
+        d["humedad_pct"] = np.nan
 
-    # requiere lo mínimo para operar / clasificar
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
 
-    # filtro por ZONAS (si viene lista desde UI)
     zones = params.get("zones", None)
     zones_list = _parse_str_list(zones)
     if zones_list is not None and len(zones_list) > 0:
@@ -395,7 +326,6 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d["tms"] = pd.to_numeric(d["tms"], errors="coerce")
     d["humedad_pct"] = pd.to_numeric(d["humedad_pct"], errors="coerce")
 
-    # si tms falta, calcúlalo con humedad
     mask_tms_bad = d["tms"].isna() | (d["tms"] <= 0)
     mask_can_calc = d["tmh"].notna() & (d["tmh"] > 0) & d["humedad_pct"].notna()
     d.loc[mask_tms_bad & mask_can_calc, "tms"] = (
@@ -410,22 +340,22 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d = d.dropna(subset=["tmh_eff"]).copy()
     d = d[(d["tmh_eff"] > 0)].copy()
 
-    # filtro duro por TMS mínima por lote
     lot_tms_min = float(params.get("lot_tms_min", 0.0) or 0.0)
     if lot_tms_min > 0:
         d = d[d["tms"] >= lot_tms_min].copy()
         if d.empty:
             return pd.DataFrame()
 
-    # reagentes: si no existen, crear
-    if "nacn_kg_t" not in d.columns: d["nacn_kg_t"] = np.nan
-    if "naoh_kg_t" not in d.columns: d["naoh_kg_t"] = np.nan
+    if "nacn_kg_t" not in d.columns:
+        d["nacn_kg_t"] = np.nan
+    if "naoh_kg_t" not in d.columns:
+        d["naoh_kg_t"] = np.nan
 
-    # finos: si no existen, crear
-    if "au_fino" not in d.columns: d["au_fino"] = np.nan
-    if "ag_fino" not in d.columns: d["ag_fino"] = np.nan
+    if "au_fino" not in d.columns:
+        d["au_fino"] = np.nan
+    if "ag_fino" not in d.columns:
+        d["ag_fino"] = np.nan
 
-    # recalcular finos donde falte (fino = ley * tms)
     mask_auf = d["au_fino"].isna()
     d.loc[mask_auf, "au_fino"] = d.loc[mask_auf, "au_gr_ton"] * d.loc[mask_auf, "tms"]
 
@@ -437,11 +367,7 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
     return d
 
-
 def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Igual que antes (para el solver): aplica filtro duro por rec >= lot_rec_min.
-    """
     d = _prep_base(df, params)
     if d is None or d.empty:
         return pd.DataFrame()
@@ -452,18 +378,7 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
     return d
 
-
 def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Construye df para insertar en la nueva tabla stg_lotes_daily_rec:
-    - Solo lotes con rec_pct < 85
-    - Clasifica rec_class en:
-        "80%-85%" (<85, >=80)
-        "70%-80%" (<80, >=70)
-        "<70%" (<70)
-    - NO incluye lotes >=85
-    - Respeta el filtro de zonas y lot_tms_min (mismo scope del run)
-    """
     d = _prep_base(df, params)
     if d is None or d.empty:
         return pd.DataFrame()
@@ -478,7 +393,6 @@ def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFra
     if d.empty:
         return pd.DataFrame()
 
-    # dejar columnas iguales a stg + rec_class
     cols = [
         "codigo", "zona",
         "tmh", "humedad_pct", "tms",
@@ -494,10 +408,6 @@ def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFra
 
     return d[cols].copy()
 
-
-# =========================
-# 3) HELPERS (misma ponderación por TMS)
-# =========================
 def wavg(values: pd.Series, weights: pd.Series) -> float:
     w = pd.to_numeric(weights, errors="coerce").fillna(0).astype(float)
     v = pd.to_numeric(values, errors="coerce").fillna(0).astype(float)
@@ -544,10 +454,6 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
         return x - hi
     return 0.0
 
-
-# =========================
-# 4) VARIOS - TRIM (misma lógica, ahora cortando por TMS)
-# =========================
 def build_varios_trim(
     lots: pd.DataFrame,
     gmin: float,
@@ -719,11 +625,12 @@ def build_varios_trim(
             + (10.0 * np.abs(tms2 - tms_target))
         )
 
-        dens = au_fino[idx] / np.maximum(tms[idx], 1e-9)
+        fine_loss = au_fino[idx]
+        tms_loss = tms[idx]
 
         ord_idx = np.lexsort((
-            -tms2,
-            dens,
+            fine_loss,
+            tms_loss,
             pen2
         ))
         pick_pos = int(ord_idx[0])
@@ -751,10 +658,6 @@ def build_varios_trim(
     out["pile_type"] = "varios"
     return out
 
-
-# =========================
-# 5) BATCH (misma lógica del solver; parametrizado por TMS)
-# =========================
 def solve_one_pile(
     lots: pd.DataFrame,
     pile_type: str,
@@ -852,6 +755,9 @@ def solve_one_pile(
         out[hi_mask] = (x[hi_mask] - hi)
         return out
 
+    LAW_BONUS = 8.0
+    FINE_BONUS = 0.002
+
     for _ in range(n_iters):
         used = np.zeros(n, dtype=bool)
         picked: list[int] = []
@@ -917,7 +823,7 @@ def solve_one_pile(
             else:
                 reag_pen = 18.0 * (cn_dist + oh_dist)
 
-            LAW_BONUS = 8.0
+            fine_add = gtms[cand_np]
 
             score = (
                 18.0 * fill
@@ -927,6 +833,7 @@ def solve_one_pile(
                 - reag_pen
                 + 0.15 * add_tms
                 + LAW_BONUS * new_g
+                + FINE_BONUS * fine_add
             )
 
             bad = bad_reag[cand_np]
@@ -987,6 +894,8 @@ def solve_one_pile(
                                 else:
                                     reag_pen2 = 18.0 * (cn_dist2 + oh_dist2)
 
+                                fine_add2 = gtms[j] + gtms[kk]
+
                                 sc = (
                                     18.0 * fill2
                                     - 250.0 * g_pen2
@@ -995,6 +904,7 @@ def solve_one_pile(
                                     - reag_pen2
                                     + 0.15 * add_tms2
                                     + LAW_BONUS * new_g2
+                                    + FINE_BONUS * fine_add2
                                 )
 
                         if sc > best_score:
@@ -1031,7 +941,7 @@ def solve_one_pile(
 
         under = max(0.0, tms_min - m["tms"])
         gap = abs(m["tms"] - tms_target)
-        key = (under, gap, -m["au_gr_ton"], -m["tms"], -m["rec_pct"])
+        key = (under, gap, -m["au_fino"], -m["au_gr_ton"], -m["tms"], -m["rec_pct"])
         if best_key is None or key < best_key:
             best_key = key
             best_sol = sol
@@ -1042,7 +952,6 @@ def solve_one_pile(
     best_sol = best_sol.copy()
     best_sol["pile_type"] = pile_type
     return best_sol
-
 
 def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.DataFrame:
     pile_rec_min = float(params["pile_rec_min"])
@@ -1111,10 +1020,6 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
 
     return pd.DataFrame()
 
-
-# =========================
-# 6) ORQUESTACIÓN
-# =========================
 def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     pile_rec_min = float(params["pile_rec_min"])
     var_tms_min = float(params["var_tms_min"])
@@ -1160,38 +1065,22 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
     return pd.DataFrame()
 
-
 def solve(
     df_raw: pd.DataFrame,
     payload: Optional[Dict[str, Any]] = None
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Input: df con columnas de stg_lotes_daily.
-    payload: overrides desde UI (opcional).
-      - Para zonas: payload["zones"] o payload["filters"]["zones"] (o "zonas").
-        Si no viene, se asume "todas" (no filtra).
-
-    Output:
-      p1, p2, p3 listos para insertar en res_pila_1/2/3
-      rej_lowrec: lotes NO usados por baja recuperación (<85) para insertar en stg_lotes_daily_rec
-    """
     params = resolve_params(payload)
 
-    # 0) construir candidatos a "rechazados por baja rec" desde el raw (sin afectar solver)
     rej_lowrec = build_rejects_lowrec(df_raw, params)
 
-    # 1) solver usa el preprocess normal (rec >= lot_rec_min)
     df = preprocess(df_raw, params)
     if df.empty:
-        # igual devolvemos rechazos (si hay)
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), rej_lowrec
 
-    # OUTPUT 1: 1 pila varios
     p1 = build_varios(df, params).copy()
     if not p1.empty:
         p1["pile_code"] = 1
 
-    # OUTPUT 2: batches 1..N (sin repetir)
     remaining = df.copy()
     batch_piles = []
     pile_idx = 1
@@ -1211,7 +1100,6 @@ def solve(
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
-    # OUTPUT 3: mixto = 1 varios + 1 batch (sin repetir)
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()
@@ -1226,7 +1114,6 @@ def solve(
 
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
 
-    # 2) Seguridad extra: si por algún cambio futuro algún <85 entrara a pilas, no lo mandes a rechazos
     used_all = set()
     for _df in [p1, p2, p3]:
         if _df is not None and not _df.empty and "codigo" in _df.columns:

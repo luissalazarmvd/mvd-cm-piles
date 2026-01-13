@@ -6,6 +6,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
+// ✅ Excel export (SheetJS)
+// npm i xlsx
+import * as XLSX from "xlsx";
+
 const PASSWORD = process.env.NEXT_PUBLIC_WEB_PASS || "";
 
 const PBI_LOTES_URL =
@@ -633,9 +637,7 @@ function ZoneDropdown({
         </div>
       )}
 
-      <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
-        Default: todas seleccionadas. Si quitas una, filtra.
-      </span>
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Default: todas seleccionadas. Si quitas una, filtra.</span>
     </div>
   );
 }
@@ -786,6 +788,24 @@ function groupLowRecByClass(rows: LotRow[]) {
   return keys.map((k) => ({ rec_class: k, rows: map.get(k)! }));
 }
 
+// ====== EXCEL helpers ======
+function sanitizeSheetName(name: string) {
+  // Excel limita a 31 chars y prohíbe: : \ / ? * [ ]
+  const cleaned = (name ?? "")
+    .replace(/[:\\\/\?\*\[\]]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (cleaned || "Hoja").slice(0, 31);
+}
+
+function setColWidths(ws: XLSX.WorkSheet, cols: Array<{ wch: number }>) {
+  (ws as any)["!cols"] = cols;
+}
+
+function aoaToSheet(aoa: any[][]) {
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -816,8 +836,9 @@ export default function Home() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [calcMsg, setCalcMsg] = useState<string>("");
 
-  // ✅ export state
-  const [exportLoading, setExportLoading] = useState(false);
+  // ✅ export state (separado)
+  const [exportPdfLoading, setExportPdfLoading] = useState(false);
+  const [exportExcelLoading, setExportExcelLoading] = useState(false);
 
   const [etlLoading, setEtlLoading] = useState(false);
 
@@ -1178,7 +1199,7 @@ export default function Home() {
 
   // ✅ EXPORT PDF (solo la vista seleccionada: 1,2,3 o 4)
   async function exportCurrentToPDF() {
-    setExportLoading(true);
+    setExportPdfLoading(true);
     try {
       const pileDate = getPileDateFromRows(flatCurrentRows);
       const dateStr = formatDDMMYYYY(pileDate);
@@ -1218,7 +1239,7 @@ export default function Home() {
         doc.line(marginX, headerH, pageW - marginX, headerH);
       };
 
-      // ====== Caso: Resultado 4 (TOTAL + 3 tablas por rec_class) ======
+      // ====== Caso: Resultado 4 (TOTAL + tablas por rec_class) ======
       if (view === "4") {
         if (!r4 || r4.length === 0) {
           alert("Sin datos para exportar.");
@@ -1238,10 +1259,9 @@ export default function Home() {
           addPageBefore: false,
         });
 
-        // 2) Tablas por categoría (3 categorías)
+        // 2) Tablas por categoría
         const groups = groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
 
-        // Si por algún motivo hay más/menos, igual exporta todas las que existan
         for (const g of groups) {
           addLowRecTable({
             doc,
@@ -1252,7 +1272,7 @@ export default function Home() {
             pageH,
             marginX,
             headerH,
-            addPageBefore: true, // ✅ cada categoría en página nueva
+            addPageBefore: true,
           });
         }
 
@@ -1372,7 +1392,181 @@ export default function Home() {
     } catch (e: any) {
       alert(e?.message || "Error exportando");
     } finally {
-      setExportLoading(false);
+      setExportPdfLoading(false);
+    }
+  }
+
+  // ✅ EXPORT EXCEL (misma lógica que PDF, sin firmas)
+  async function exportCurrentToExcel() {
+    setExportExcelLoading(true);
+    try {
+      const pileDate = getPileDateFromRows(flatCurrentRows);
+      const dateStr = formatDDMMYYYY(pileDate);
+
+      const wb = XLSX.utils.book_new();
+
+      const headerRow = (cols: readonly string[], isLow = false) =>
+        cols.map((c) => {
+          if (isLow) return (COL_LABEL_LOWREC as any)[c] ?? c;
+          return (COL_LABEL as any)[c] ?? c;
+        });
+
+      const buildSheetForRows = (params: { title: string; rows: LotRow[]; lowRec?: boolean; kpiText?: string }) => {
+        const { title, rows, lowRec, kpiText } = params;
+
+        const cols = lowRec ? (COLS_LOWREC as unknown as string[]) : (COLS as unknown as string[]);
+        const head = headerRow(cols as any, !!lowRec);
+
+        const aoa: any[][] = [];
+        aoa.push(["Fecha de Pila", dateStr]);
+        aoa.push([title]);
+        if (kpiText) aoa.push([kpiText]);
+        aoa.push([]);
+        aoa.push(head);
+
+        if (!rows || rows.length === 0) {
+          aoa.push(["Sin datos."]);
+        } else {
+          rows.forEach((r, i) => {
+            const base = [
+              i + 1,
+              r.codigo ?? "",
+              r.zona ?? "",
+              n(r.tmh),
+              n(r.humedad_pct),
+              n(r.tms),
+              n(r.au_gr_ton),
+              n(r.au_fino),
+              n(r.ag_gr_ton),
+              n(r.ag_fino),
+              n(r.cu_pct),
+              n(r.nacn_kg_t),
+              n(r.naoh_kg_t),
+              n(r.rec_pct),
+            ];
+
+            if (lowRec) {
+              aoa.push([...base, (r.rec_class ?? "").toString()]);
+            } else {
+              aoa.push(base);
+            }
+          });
+
+          const tot = totalsForExport(rows);
+
+          const subtotalBase = [
+            "",
+            "SUBTOTAL",
+            `(${rows.length} lotes)`,
+            tot.tmhSum,
+            tot.humW,
+            tot.tmsSum,
+            tot.auW,
+            tot.auFinoSum,
+            tot.agW,
+            tot.agFinoSum,
+            tot.cuW,
+            tot.nacnW,
+            tot.naohW,
+            tot.recW,
+          ];
+
+          if (lowRec) aoa.push([...subtotalBase, ""]);
+          else aoa.push(subtotalBase);
+        }
+
+        const ws = aoaToSheet(aoa);
+
+        // Ancho de columnas (simple)
+        const baseCols = [
+          { wch: 6 }, // #
+          { wch: 14 }, // código
+          { wch: 16 }, // zona
+          { wch: 12 }, // TMH
+          { wch: 14 }, // Hum
+          { wch: 12 }, // TMS
+          { wch: 10 }, // Au g/t
+          { wch: 14 }, // Au fino
+          { wch: 10 }, // Ag g/t
+          { wch: 14 }, // Ag fino
+          { wch: 10 }, // Cu
+          { wch: 14 }, // NaCN
+          { wch: 14 }, // NaOH
+          { wch: 10 }, // Rec
+        ];
+        const colsW = lowRec ? [...baseCols, { wch: 18 }] : baseCols;
+        setColWidths(ws, colsW);
+
+        return ws;
+      };
+
+      // ====== Caso: Resultado 4 (TOTAL + tablas por rec_class) ======
+      if (view === "4") {
+        if (!r4 || r4.length === 0) {
+          alert("Sin datos para exportar.");
+          return;
+        }
+
+        // Total
+        XLSX.utils.book_append_sheet(
+          wb,
+          buildSheetForRows({
+            title: "Baja Recuperación (Total)",
+            rows: r4,
+            lowRec: true,
+          }),
+          sanitizeSheetName("BajaRec Total")
+        );
+
+        // Por clasificación
+        const groups = groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
+        for (const g of groups) {
+          XLSX.utils.book_append_sheet(
+            wb,
+            buildSheetForRows({
+              title: `Baja Recuperación – ${g.rec_class}`,
+              rows: g.rows,
+              lowRec: true,
+            }),
+            sanitizeSheetName(`BR ${g.rec_class}`)
+          );
+        }
+
+        const fname = `Export_BajaRec_${dateStr.replaceAll("/", "-")}.xlsx`;
+        XLSX.writeFile(wb, fname);
+        return;
+      }
+
+      // ====== Caso: Resultados 1/2/3 (tablas por pila => 1 hoja por pila) ======
+      const piles = current;
+      if (!piles || piles.length === 0) {
+        alert("Sin datos para exportar.");
+        return;
+      }
+
+      for (const p of piles) {
+        const k = pileKPIs(p.lotes);
+        const kpiText = `TMS=${fmt(k.tmsSum, 1)} | Au=${fmt(k.auWeighted, 2)} g/t | Hum=${fmt(k.humWeighted, 2)}% | Rec=${fmt(k.recWeighted, 2)}%`;
+
+        const sheetName = sanitizeSheetName(`Pila ${p.pile_code} ${p.pile_type}`);
+        XLSX.utils.book_append_sheet(
+          wb,
+          buildSheetForRows({
+            title: `Pila #${p.pile_code} (${p.pile_type})`,
+            rows: p.lotes,
+            lowRec: false,
+            kpiText,
+          }),
+          sheetName
+        );
+      }
+
+      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.xlsx`;
+      XLSX.writeFile(wb, fname);
+    } catch (e: any) {
+      alert(e?.message || "Error exportando Excel");
+    } finally {
+      setExportExcelLoading(false);
     }
   }
 
@@ -1480,9 +1674,10 @@ export default function Home() {
             {etlLoading ? "Cargando..." : "Cargar lotes"}
           </button>
 
+          {/* ✅ Exportar PDF (antes: Exportar) */}
           <button
             onClick={exportCurrentToPDF}
-            disabled={exportLoading}
+            disabled={exportPdfLoading}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -1490,12 +1685,31 @@ export default function Home() {
               background: "#A7D8FF",
               color: "#003A63",
               fontWeight: "bold",
-              cursor: exportLoading ? "not-allowed" : "pointer",
+              cursor: exportPdfLoading ? "not-allowed" : "pointer",
               whiteSpace: "nowrap",
             }}
-            title="Exporta SOLO el resultado seleccionado (tab actual)"
+            title="Exporta SOLO el resultado seleccionado (tab actual) a PDF"
           >
-            {exportLoading ? "Exportando..." : "Exportar"}
+            {exportPdfLoading ? "Exportando..." : "Exportar PDF"}
+          </button>
+
+          {/* ✅ NUEVO: Exportar Excel */}
+          <button
+            onClick={exportCurrentToExcel}
+            disabled={exportExcelLoading}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "none",
+              background: "#A7D8FF",
+              color: "#003A63",
+              fontWeight: "bold",
+              cursor: exportExcelLoading ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+            title="Exporta SOLO el resultado seleccionado (tab actual) a Excel"
+          >
+            {exportExcelLoading ? "Exportando..." : "Exportar Excel"}
           </button>
 
           <button
@@ -1553,9 +1767,7 @@ export default function Home() {
           />
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
-          Usa los filtros del reporte para validar el universo de lotes disponible.
-        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>Usa los filtros del reporte para validar el universo de lotes disponible.</div>
       </section>
 
       {/* Panel de parámetros + botón Calcular */}
@@ -1605,13 +1817,7 @@ export default function Home() {
           {/* ✅ PRIMERO: selector de ZONAS */}
           <ZoneDropdown zones={zonesAll} selected={zonesSelected} onToggle={toggleZone} onSelectAll={selectAllZones} />
 
-          <InputRow
-            label="TMS mínimo de Lote"
-            value={lot_tms_min}
-            onChange={setLotTmsMin}
-            placeholder={`${DEFAULTS.lot_tms_min}`}
-            hint="0 = no filtra"
-          />
+          <InputRow label="TMS mínimo de Lote" value={lot_tms_min} onChange={setLotTmsMin} placeholder={`${DEFAULTS.lot_tms_min}`} hint="0 = no filtra" />
 
           <InputRow
             label="Recuperación Mínima de Lote (%)"

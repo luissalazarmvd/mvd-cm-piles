@@ -763,6 +763,29 @@ function drawSignatures(doc: jsPDF, pageW: number, pageH: number, marginX: numbe
   drawSigBlock(c3, "Control de Minerales");
 }
 
+function groupLowRecByClass(rows: LotRow[]) {
+  const map = new Map<string, LotRow[]>();
+  for (const r of rows) {
+    const k = (r.rec_class ?? "").trim() || "SIN CLASIFICACIÓN";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(r);
+  }
+
+  // Orden: intenta mantener un orden "lógico" si existe, si no alfabético
+  const preferred = ["CRÍTICA", "CRITICA", "ALTA", "MEDIA", "BAJA", "SIN CLASIFICACIÓN"];
+  const keys = Array.from(map.keys());
+  keys.sort((a, b) => {
+    const ia = preferred.findIndex((p) => p.toUpperCase() === a.toUpperCase());
+    const ib = preferred.findIndex((p) => p.toUpperCase() === b.toUpperCase());
+    const pa = ia === -1 ? 999 : ia;
+    const pb = ib === -1 ? 999 : ib;
+    if (pa !== pb) return pa - pb;
+    return a.localeCompare(b);
+  });
+
+  return keys.map((k) => ({ rec_class: k, rows: map.get(k)! }));
+}
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -875,57 +898,52 @@ export default function Home() {
   }
 
   async function loadAll() {
-  setLoading(true);
-  setLoadError("");
+    setLoading(true);
+    setLoadError("");
 
-  try {
-    // 1) Siempre intenta cargar 1..3 (críticos)
-    const [a, b, c] = await Promise.all([
-      fetch("/api/pilas?which=1", { cache: "no-store" }),
-      fetch("/api/pilas?which=2", { cache: "no-store" }),
-      fetch("/api/pilas?which=3", { cache: "no-store" }),
-    ]);
-
-    const ja = await a.json().catch(() => ({}));
-    const jb = await b.json().catch(() => ({}));
-    const jc = await c.json().catch(() => ({}));
-
-    if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
-    if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
-    if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
-
-    setR1(Array.isArray(ja?.rows) ? ja.rows : []);
-    setR2(Array.isArray(jb?.rows) ? jb.rows : []);
-    setR3(Array.isArray(jc?.rows) ? jc.rows : []);
-
-    // 2) Resultado 4 (NO crítico): si falla, NO borres los otros
     try {
-      const d = await fetch("/api/pilas?which=4", { cache: "no-store" });
-      const jd = await d.json().catch(() => ({}));
-      if (!d.ok) {
-        // backend aún no soporta which=4 -> NO tumbar todo
-        setR4([]);
-        // opcional: mostrar aviso suave (o comenta esta línea)
-        // setLoadError(jd?.error || "Resultado 4 no disponible");
-      } else {
-        setR4(Array.isArray(jd?.rows) ? jd.rows : []);
-      }
-    } catch {
-      setR4([]);
-      // opcional: setLoadError("Resultado 4 no disponible");
-    }
-  } catch (e: any) {
-    // Si falla 1..3 recién ahí sí es crítico
-    setLoadError(e?.message || "Error");
-    setR1([]);
-    setR2([]);
-    setR3([]);
-    setR4([]);
-  } finally {
-    setLoading(false);
-  }
-}
+      // 1) Siempre intenta cargar 1..3 (críticos)
+      const [a, b, c] = await Promise.all([
+        fetch("/api/pilas?which=1", { cache: "no-store" }),
+        fetch("/api/pilas?which=2", { cache: "no-store" }),
+        fetch("/api/pilas?which=3", { cache: "no-store" }),
+      ]);
 
+      const ja = await a.json().catch(() => ({}));
+      const jb = await b.json().catch(() => ({}));
+      const jc = await c.json().catch(() => ({}));
+
+      if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
+      if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
+      if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
+
+      setR1(Array.isArray(ja?.rows) ? ja.rows : []);
+      setR2(Array.isArray(jb?.rows) ? jb.rows : []);
+      setR3(Array.isArray(jc?.rows) ? jc.rows : []);
+
+      // 2) Resultado 4 (NO crítico): si falla, NO borres los otros
+      try {
+        const d = await fetch("/api/pilas?which=4", { cache: "no-store" });
+        const jd = await d.json().catch(() => ({}));
+        if (!d.ok) {
+          setR4([]);
+        } else {
+          setR4(Array.isArray(jd?.rows) ? jd.rows : []);
+        }
+      } catch {
+        setR4([]);
+      }
+    } catch (e: any) {
+      // Si falla 1..3 recién ahí sí es crítico
+      setLoadError(e?.message || "Error");
+      setR1([]);
+      setR2([]);
+      setR3([]);
+      setR4([]);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function runSolver() {
     setCalcLoading(true);
@@ -954,9 +972,7 @@ export default function Home() {
 
       const ins = j?.inserted;
       if (ins) {
-        setCalcMsg(
-          `OK: p1=${ins?.p1 ?? 0}, p2=${ins?.p2 ?? 0}, p3=${ins?.p3 ?? 0}, baja_rec=${ins?.rej_lowrec ?? ins?.p4 ?? 0}`
-        );
+        setCalcMsg(`OK: p1=${ins?.p1 ?? 0}, p2=${ins?.p2 ?? 0}, p3=${ins?.p3 ?? 0}, baja_rec=${ins?.rej_lowrec ?? ins?.p4 ?? 0}`);
       } else {
         setCalcMsg("OK");
       }
@@ -1028,6 +1044,138 @@ export default function Home() {
     );
   };
 
+  function addSignaturesBelowLastTable(params: {
+    doc: jsPDF;
+    drawHeader: () => void;
+    pageW: number;
+    pageH: number;
+    marginX: number;
+    headerH: number;
+    titleOnNewPage?: string;
+  }) {
+    const { doc, drawHeader, pageW, pageH, marginX, headerH, titleOnNewPage } = params;
+
+    let lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+    const needH = 120;
+    const footerTopYMin = pageH - needH;
+
+    if (lastY > footerTopYMin) {
+      doc.addPage();
+      drawHeader();
+      if (titleOnNewPage) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(titleOnNewPage, marginX, headerH + 22);
+      }
+      lastY = headerH + 28;
+    }
+
+    const yLine = Math.max(lastY + 24, pageH - 95);
+    drawSignatures(doc, pageW, pageH, marginX, yLine);
+  }
+
+  function addLowRecTable(params: {
+    doc: jsPDF;
+    drawHeader: () => void;
+    title: string;
+    rows: LotRow[];
+    pageW: number;
+    pageH: number;
+    marginX: number;
+    headerH: number;
+    addPageBefore?: boolean;
+  }) {
+    const { doc, drawHeader, title, rows, pageW, pageH, marginX, headerH, addPageBefore } = params;
+
+    if (addPageBefore) doc.addPage();
+    drawHeader();
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(title, marginX, headerH + 22);
+
+    const head = [COLS_LOWREC.map((c) => COL_LABEL_LOWREC[c as ColKeyLow] ?? c)];
+
+    const body = rows.map((r, i) => [
+      String(i + 1), // ✅ enumeración reinicia desde 1
+      r.codigo ?? "",
+      r.zona ?? "",
+      fmt(r.tmh, 2),
+      fmt(r.humedad_pct, 2),
+      fmt(r.tms, 2),
+      fmt(r.au_gr_ton, 2),
+      fmt(r.au_fino, 2),
+      fmt(r.ag_gr_ton, 2),
+      fmt(r.ag_fino, 2),
+      fmt(r.cu_pct, 2),
+      fmt(r.nacn_kg_t, 2),
+      fmt(r.naoh_kg_t, 2),
+      fmt(r.rec_pct, 2),
+      r.rec_class ?? "",
+    ]);
+
+    const tot = totalsForExport(rows);
+
+    autoTable(doc, {
+      head,
+      body,
+      foot: [
+        [
+          "",
+          "SUBTOTAL",
+          `(${rows.length} lotes)`,
+          fmt(tot.tmhSum, 2),
+          fmt(tot.humW, 2),
+          fmt(tot.tmsSum, 2),
+          fmt(tot.auW, 2),
+          fmt(tot.auFinoSum, 2),
+          fmt(tot.agW, 2),
+          fmt(tot.agFinoSum, 2),
+          fmt(tot.cuW, 2),
+          fmt(tot.nacnW, 2),
+          fmt(tot.naohW, 2),
+          fmt(tot.recW, 2),
+          "",
+        ],
+      ],
+      showFoot: "lastPage",
+      startY: headerH + 36,
+      margin: { left: marginX, right: marginX },
+      theme: "grid",
+      styles: {
+        font: "helvetica",
+        fontSize: 8,
+        cellPadding: 3,
+        lineWidth: 0.6,
+        lineColor: [180, 180, 180],
+      },
+      headStyles: {
+        fillColor: [0, 103, 172],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        lineWidth: 0.6,
+        lineColor: [180, 180, 180],
+      },
+      footStyles: {
+        fillColor: [255, 255, 255],
+        textColor: [0, 103, 172],
+        fontStyle: "bold",
+        lineWidth: 0.6,
+        lineColor: [180, 180, 180],
+      },
+    });
+
+    addSignaturesBelowLastTable({
+      doc,
+      drawHeader,
+      pageW,
+      pageH,
+      marginX,
+      headerH,
+      titleOnNewPage: `Firmas – ${title}`,
+    });
+  }
+
   // ✅ EXPORT PDF (solo la vista seleccionada: 1,2,3 o 4)
   async function exportCurrentToPDF() {
     setExportLoading(true);
@@ -1070,103 +1218,43 @@ export default function Home() {
         doc.line(marginX, headerH, pageW - marginX, headerH);
       };
 
-      // ====== Caso: Resultado 4 (una sola tabla) ======
+      // ====== Caso: Resultado 4 (TOTAL + 3 tablas por rec_class) ======
       if (view === "4") {
         if (!r4 || r4.length === 0) {
           alert("Sin datos para exportar.");
           return;
         }
 
-        drawHeader();
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text("Baja Recuperación", marginX, headerH + 22);
-
-        const head = [COLS_LOWREC.map((c) => COL_LABEL_LOWREC[c as ColKeyLow] ?? c)];
-
-        const body = r4.map((r, i) => [
-          String(i + 1),
-          r.codigo ?? "",
-          r.zona ?? "",
-          fmt(r.tmh, 2),
-          fmt(r.humedad_pct, 2),
-          fmt(r.tms, 2),
-          fmt(r.au_gr_ton, 2),
-          fmt(r.au_fino, 2),
-          fmt(r.ag_gr_ton, 2),
-          fmt(r.ag_fino, 2),
-          fmt(r.cu_pct, 2),
-          fmt(r.nacn_kg_t, 2),
-          fmt(r.naoh_kg_t, 2),
-          fmt(r.rec_pct, 2),
-          r.rec_class ?? "",
-        ]);
-
-        const tot = totalsForExport(r4);
-
-        autoTable(doc, {
-          head,
-          body,
-          foot: [
-            [
-              "",
-              "SUBTOTAL",
-              `(${r4.length} lotes)`,
-              fmt(tot.tmhSum, 2),
-              fmt(tot.humW, 2),
-              fmt(tot.tmsSum, 2),
-              fmt(tot.auW, 2),
-              fmt(tot.auFinoSum, 2),
-              fmt(tot.agW, 2),
-              fmt(tot.agFinoSum, 2),
-              fmt(tot.cuW, 2),
-              fmt(tot.nacnW, 2),
-              fmt(tot.naohW, 2),
-              fmt(tot.recW, 2),
-              "",
-            ],
-          ],
-          showFoot: "lastPage",
-          startY: headerH + 36,
-          margin: { left: marginX, right: marginX },
-          theme: "grid",
-          styles: {
-            font: "helvetica",
-            fontSize: 8,
-            cellPadding: 3,
-            lineWidth: 0.6,
-            lineColor: [180, 180, 180],
-          },
-          headStyles: {
-            fillColor: [0, 103, 172],
-            textColor: [255, 255, 255],
-            fontStyle: "bold",
-            lineWidth: 0.6,
-            lineColor: [180, 180, 180],
-          },
-          footStyles: {
-            fillColor: [255, 255, 255],
-            textColor: [0, 103, 172],
-            fontStyle: "bold",
-            lineWidth: 0.6,
-            lineColor: [180, 180, 180],
-          },
+        // 1) Tabla total (como ahora)
+        addLowRecTable({
+          doc,
+          drawHeader,
+          title: "Baja Recuperación (Total)",
+          rows: r4,
+          pageW,
+          pageH,
+          marginX,
+          headerH,
+          addPageBefore: false,
         });
 
-        // ✅ firmas debajo del final de ESTA tabla (en la última página)
-        let lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
+        // 2) Tablas por categoría (3 categorías)
+        const groups = groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
 
-        const needH = 120;
-        const footerTopYMin = pageH - needH;
-        if (lastY > footerTopYMin) {
-          doc.addPage();
-          drawHeader();
-          lastY = headerH + 20;
+        // Si por algún motivo hay más/menos, igual exporta todas las que existan
+        for (const g of groups) {
+          addLowRecTable({
+            doc,
+            drawHeader,
+            title: `Baja Recuperación – ${g.rec_class}`,
+            rows: g.rows,
+            pageW,
+            pageH,
+            marginX,
+            headerH,
+            addPageBefore: true, // ✅ cada categoría en página nueva
+          });
         }
-
-        const yLine = Math.max(lastY + 24, pageH - 95);
-        drawSignatures(doc, pageW, pageH, marginX, yLine);
 
         const fname = `Export_BajaRec_${dateStr.replaceAll("/", "-")}.pdf`;
         doc.save(fname);
@@ -1268,29 +1356,18 @@ export default function Home() {
           },
         });
 
-        // ✅ firmas debajo del final de CADA tabla (por pila)
-        let lastY = (doc as any).lastAutoTable?.finalY ?? headerH + 60;
-
-        const needH = 120;
-        const footerTopYMin = pageH - needH;
-
-        if (lastY > footerTopYMin) {
-          doc.addPage();
-          drawHeader();
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(10);
-          doc.text(`Firmas – Pila #${p.pile_code} (${p.pile_type})`, marginX, headerH + 22);
-          lastY = headerH + 28;
-        }
-
-        const yLine = Math.max(lastY + 24, pageH - 95);
-        drawSignatures(doc, pageW, pageH, marginX, yLine);
+        addSignaturesBelowLastTable({
+          doc,
+          drawHeader,
+          pageW,
+          pageH,
+          marginX,
+          headerH,
+          titleOnNewPage: `Firmas – Pila #${p.pile_code} (${p.pile_type})`,
+        });
       });
 
-      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll(
-        "/",
-        "-"
-      )}.pdf`;
+      const fname = `Export_${view === "1" ? "Resultado1" : view === "2" ? "Resultado2" : "Resultado3"}_${dateStr.replaceAll("/", "-")}.pdf`;
       doc.save(fname);
     } catch (e: any) {
       alert(e?.message || "Error exportando");

@@ -410,8 +410,11 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         return pd.DataFrame()
 
     lot_rec_min = float(params.get("lot_rec_min", 85.0))
+    pile_rec_min = float(params.get("pile_rec_min", 85.0))
+    eff_lot_rec_min = min(lot_rec_min, pile_rec_min)
+
     d = d[d["rec_pct"].notna()].copy()
-    d = d[d["rec_pct"] >= lot_rec_min].copy()
+    d = d[d["rec_pct"] >= eff_lot_rec_min].copy()
     return d
 
 
@@ -498,6 +501,167 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
     if x > hi:
         return x - hi
     return 0.0
+
+
+# =========================
+# TOP-UP (rellenar pila con lotes más "pobres" sin romper constraints)
+# =========================
+def top_up_pile(
+    pile: pd.DataFrame,
+    pool: pd.DataFrame,
+    *,
+    rec_min: float,
+    tms_max: float,
+    tms_target: float,
+    gmin: float,
+    gmax: float,
+    gmin_exclusive: bool,
+    gmax_inclusive: bool,
+    enforce_reagents: bool,
+    reag_min: float,
+    reag_max: float,
+) -> pd.DataFrame:
+    if pile is None or pile.empty:
+        return pile
+    if pool is None or pool.empty:
+        return pile
+
+    cur = pile.copy()
+    used = set(cur["codigo"].astype(str).tolist())
+
+    cand = pool.copy()
+    cand = cand.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    cand = cand[(cand["tms"] > 0) & (cand["tmh_eff"] > 0)].copy()
+    if cand.empty:
+        return cur
+
+    cand = cand[~cand["codigo"].astype(str).isin(used)].copy()
+    if cand.empty:
+        return cur
+
+    if enforce_reagents:
+        cand = cand.dropna(subset=["nacn_kg_t", "naoh_kg_t"]).copy()
+        if cand.empty:
+            return cur
+
+    def _sumcol(df_: pd.DataFrame, col: str) -> float:
+        return float(pd.to_numeric(df_.get(col, pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
+
+    # acumulados actuales
+    cur_tms = _sumcol(cur, "tms")
+    cur_gtms = float((pd.to_numeric(cur["au_gr_ton"], errors="coerce").fillna(0).to_numpy(float) *
+                      pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
+    cur_rtms = float((pd.to_numeric(cur["rec_pct"], errors="coerce").fillna(0).to_numpy(float) *
+                      pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
+
+    cur_cntms = float((pd.to_numeric(cur["nacn_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
+                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
+    cur_ohtms = float((pd.to_numeric(cur["naoh_kg_t"], errors="coerce").fillna(0).to_numpy(float) *
+                       pd.to_numeric(cur["tms"], errors="coerce").fillna(0).to_numpy(float)).sum())
+
+    # loop greedy: agrega el mejor candidato que acerque a target sin romper constraints
+    max_iters = int(len(cand) + 5)
+    it = 0
+
+    while it < max_iters:
+        it += 1
+
+        cap = tms_max - cur_tms
+        if cap <= 1e-9:
+            break
+
+        # si ya está suficientemente cerca o por encima del target, paramos
+        if cur_tms >= min(tms_target, tms_max) - 1e-6:
+            break
+
+        best_i = None
+        best_key = None
+
+        # ordena candidatos por: rec desc (más seguro), luego tms desc (más volumen)
+        cand2 = cand.copy()
+        cand2["_rec"] = pd.to_numeric(cand2["rec_pct"], errors="coerce").fillna(-1e9)
+        cand2["_tms"] = pd.to_numeric(cand2["tms"], errors="coerce").fillna(0)
+        cand2 = cand2.sort_values(by=["_rec", "_tms"], ascending=[False, False])
+
+        for i, row in cand2.iterrows():
+            tms_i = float(_to_float(row.get("tms"), 0.0))
+            if tms_i <= 0 or tms_i > cap + 1e-9:
+                continue
+
+            g_i = float(_to_float(row.get("au_gr_ton"), float("nan")))
+            r_i = float(_to_float(row.get("rec_pct"), float("nan")))
+            if not math.isfinite(g_i) or not math.isfinite(r_i):
+                continue
+
+            cn_i = float(_to_float(row.get("nacn_kg_t"), float("nan")))
+            oh_i = float(_to_float(row.get("naoh_kg_t"), float("nan")))
+            if enforce_reagents and (not math.isfinite(cn_i) or not math.isfinite(oh_i)):
+                continue
+
+            new_tms = cur_tms + tms_i
+            if new_tms <= 0:
+                continue
+            if new_tms > tms_max + 1e-9:
+                continue
+
+            new_gtms = cur_gtms + (g_i * tms_i)
+            new_rtms = cur_rtms + (r_i * tms_i)
+
+            new_g = new_gtms / new_tms
+            new_r = new_rtms / new_tms
+
+            if new_r < rec_min - 1e-9:
+                continue
+            if not grade_ok(new_g, gmin, gmax, gmin_exclusive=gmin_exclusive, gmax_inclusive=gmax_inclusive):
+                continue
+
+            if enforce_reagents:
+                new_cntms = cur_cntms + (cn_i * tms_i)
+                new_ohtms = cur_ohtms + (oh_i * tms_i)
+                new_cn = new_cntms / new_tms
+                new_oh = new_ohtms / new_tms
+                if (not reag_ok(new_cn, reag_min, reag_max)) or (not reag_ok(new_oh, reag_min, reag_max)):
+                    continue
+
+            gap = abs(new_tms - tms_target)
+            # key: menor gap, mayor tms
+            key = (gap, -new_tms)
+
+            if best_key is None or key < best_key:
+                best_key = key
+                best_i = i
+
+            # si encontramos uno que ya deja casi exacto, cortamos búsqueda
+            if best_key is not None and best_key[0] <= 1e-6:
+                break
+
+        if best_i is None:
+            break
+
+        add_row = cand.loc[[best_i]].copy()
+        cur = pd.concat([cur, add_row], ignore_index=True)
+
+        # actualiza acumulados
+        tms_i = float(_to_float(add_row.iloc[0].get("tms"), 0.0))
+        g_i = float(_to_float(add_row.iloc[0].get("au_gr_ton"), 0.0))
+        r_i = float(_to_float(add_row.iloc[0].get("rec_pct"), 0.0))
+        cn_i = float(_to_float(add_row.iloc[0].get("nacn_kg_t"), 0.0))
+        oh_i = float(_to_float(add_row.iloc[0].get("naoh_kg_t"), 0.0))
+
+        cur_tms += tms_i
+        cur_gtms += (g_i * tms_i)
+        cur_rtms += (r_i * tms_i)
+        cur_cntms += (cn_i * tms_i)
+        cur_ohtms += (oh_i * tms_i)
+
+        used.add(str(add_row.iloc[0].get("codigo")))
+        cand = cand[~cand["codigo"].astype(str).isin(used)].copy()
+        if cand.empty:
+            break
+
+    # limpia helper cols si quedaron (por si)
+    cur = cur.drop(columns=[c for c in ["_rec", "_tms"] if c in cur.columns], errors="ignore")
+    return cur
 
 
 # =========================
@@ -727,9 +891,9 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     reag_min = float(params["reag_min"])
     reag_max = float(params["reag_max"])
 
-    def _try(eligible_in: pd.DataFrame, enforce_reagents: bool) -> pd.DataFrame:
+    def _try(eligible_in: pd.DataFrame, enforce_reagents: bool) -> Tuple[pd.DataFrame, Optional[float], Optional[float], bool]:
         if eligible_in is None or eligible_in.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(), None, None, enforce_reagents
         for (gmin, gmax) in g_tries:
             p = build_varios_trim(
                 lots=eligible_in,
@@ -744,33 +908,63 @@ def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
                 reag_max=reag_max,
             )
             if p is not None and not p.empty:
-                return p
-        return pd.DataFrame()
+                return p, float(gmin), float(gmax), enforce_reagents
+        return pd.DataFrame(), None, None, enforce_reagents
 
     # Etapa 0 (PREFERENCIA): SOLO rec >= default_pile_rec_min (siempre empieza con "mejor calidad")
     pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
     eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
-    p = _try(eligible_pref, enforce_reagents=True)
+    p, gmin_used, gmax_used, enf_used = _try(eligible_pref, enforce_reagents=True)
     if not p.empty:
+        # RELLENO: agrega lotes "más pobres" (>= pile_rec_min y < pref_rec) si ayuda a llegar al target
+        pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
+        p = top_up_pile(
+            p, pool_poor,
+            rec_min=pile_rec_min,
+            tms_max=tms_max,
+            tms_target=tms_target,
+            gmin=float(gmin_used),
+            gmax=float(gmax_used),
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            enforce_reagents=bool(enf_used),
+            reag_min=reag_min,
+            reag_max=reag_max,
+        )
         return p
-    p = _try(eligible_pref, enforce_reagents=False)
+
+    p, gmin_used, gmax_used, enf_used = _try(eligible_pref, enforce_reagents=False)
     if not p.empty:
+        pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
+        p = top_up_pile(
+            p, pool_poor,
+            rec_min=pile_rec_min,
+            tms_max=tms_max,
+            tms_target=tms_target,
+            gmin=float(gmin_used),
+            gmax=float(gmax_used),
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            enforce_reagents=bool(enf_used),
+            reag_min=reag_min,
+            reag_max=reag_max,
+        )
         return p
 
     # Etapa 1: SOLO rec >= pile_rec_min (params)
     eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
-    p = _try(eligible_hi, enforce_reagents=True)
+    p, _, _, _ = _try(eligible_hi, enforce_reagents=True)
     if not p.empty:
         return p
-    p = _try(eligible_hi, enforce_reagents=False)
+    p, _, _, _ = _try(eligible_hi, enforce_reagents=False)
     if not p.empty:
         return p
 
     # Etapa 2: universo completo
-    p = _try(eligible, enforce_reagents=True)
+    p, _, _, _ = _try(eligible, enforce_reagents=True)
     if not p.empty:
         return p
-    p = _try(eligible, enforce_reagents=False)
+    p, _, _, _ = _try(eligible, enforce_reagents=False)
     if not p.empty:
         return p
 
@@ -1096,9 +1290,9 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         if eligible.empty:
             return pd.DataFrame()
 
-    def _try(eligible_in: pd.DataFrame, seed_in: int) -> pd.DataFrame:
+    def _try(eligible_in: pd.DataFrame, seed_in: int) -> Tuple[pd.DataFrame, bool]:
         if eligible_in is None or eligible_in.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(), True
 
         p = solve_one_pile(
             lots=eligible_in,
@@ -1123,7 +1317,7 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             pair_pool=int(params["batch_pair_pool"]),
         )
         if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
-            return p
+            return p, True
 
         p = solve_one_pile(
             lots=eligible_in,
@@ -1148,25 +1342,41 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
             pair_pool=int(params["batch_pair_pool"]),
         )
         if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
-            return p
+            return p, False
 
-        return pd.DataFrame()
+        return pd.DataFrame(), True
 
     # Etapa 0 (PREFERENCIA): SOLO rec >= default_pile_rec_min (siempre empieza con "mejor calidad")
     pref_rec = max(float(DEFAULT_PARAMS["pile_rec_min"]), float(pile_rec_min))
     eligible_pref = eligible[eligible["rec_pct"] >= pref_rec].copy()
-    p = _try(eligible_pref, seed)
+    p, enf_used = _try(eligible_pref, seed)
     if not p.empty:
+        # RELLENO: agrega lotes "más pobres" (>= pile_rec_min y < pref_rec) si ayuda a llegar al target
+        pool_poor = eligible[(eligible["rec_pct"] >= pile_rec_min) & (eligible["rec_pct"] < pref_rec)].copy()
+        p = top_up_pile(
+            p, pool_poor,
+            rec_min=pile_rec_min,
+            tms_max=float(params["bat_tms_max"]),
+            tms_target=float(params["bat_tms_target"]),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            enforce_reagents=bool(enf_used),
+            reag_min=float(params["reag_min"]),
+            reag_max=float(params["reag_max"]),
+        )
         return p
 
     # Etapa 1: SOLO rec >= pile_rec_min (params)
     eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
-    p = _try(eligible_hi, seed)
+    p, _ = _try(eligible_hi, seed)
     if not p.empty:
         return p
 
     # Etapa 2: universo completo
-    return _try(eligible, seed)
+    p, _ = _try(eligible, seed)
+    return p
 
 
 # =========================

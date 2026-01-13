@@ -4,23 +4,34 @@ from typing import Any, Dict, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 
+# =========================
+# PARAMS
+# =========================
 DEFAULT_PARAMS: Dict[str, Any] = {
     "lot_rec_min": 85.0,
     "pile_rec_min": 85.0,
     "lot_tms_min": 0.0,
     "zones": None,
+
+    # VARIOS (TMS)
     "var_tms_max": 550.0,
     "var_tms_target": 550.0,
     "var_tms_min": 250.0,
     "var_g_tries": [(20.0, 24.0), (19.5, 24.0), (19.0, 24.0)],
+
+    # BATCH (TMS)
     "bat_tms_max": 120.0,
     "bat_tms_target": 120.0,
     "bat_tms_min": 80.0,
     "bat_lot_g_min": 0.0,
     "bat_pile_g_min": 30.0,
     "bat_pile_g_max": 1e9,
+
+    # REAGENTES (CN / NaOH)
     "reag_min": 4.0,
     "reag_max": 8.0,
+
+    # KNOBS
     "batch_n_iters_hard": 900,
     "batch_n_iters_soft": 1400,
     "batch_max_steps": 600,
@@ -28,9 +39,12 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "batch_reseeds": 2,
     "batch_pair_topk": 10,
     "batch_pair_pool": 16,
+
+    # SEEDS
     "seed_batch_base": 100,
     "seed_mix_batch": 888,
 }
+
 
 def _to_float(x: Any, default: float) -> float:
     try:
@@ -41,11 +55,13 @@ def _to_float(x: Any, default: float) -> float:
     except:
         return default
 
+
 def _to_int(x: Any, default: int) -> int:
     try:
         return int(x)
     except:
         return default
+
 
 def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     if x is None:
@@ -92,12 +108,14 @@ def _parse_var_g_tries(x: Any, default: List[Tuple[float, float]]) -> List[Tuple
 
     return default
 
+
 def _normalize_zone_str(x: Any) -> str:
     try:
         s = str(x).strip()
         return s
     except:
         return ""
+
 
 def _parse_str_list(x: Any) -> Optional[List[str]]:
     if x is None:
@@ -128,6 +146,7 @@ def _parse_str_list(x: Any) -> Optional[List[str]]:
             uniq.append(s)
 
     return uniq if len(uniq) > 0 else None
+
 
 def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     p = dict(DEFAULT_PARAMS)
@@ -264,10 +283,14 @@ def resolve_params(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         p["bat_lot_g_min"] = 0.0
 
     p["zones"] = _parse_str_list(p.get("zones"))
-
     return p
 
+
+# =========================
+# REJECTS LOW REC
+# =========================
 REJ_REC_CEIL = 85.0
+
 
 def _classify_rec_series(rec: pd.Series) -> pd.Series:
     r = pd.to_numeric(rec, errors="coerce")
@@ -280,12 +303,17 @@ def _classify_rec_series(rec: pd.Series) -> pd.Series:
     out = np.select(conds, choices, default=None)
     return pd.Series(out, index=rec.index, dtype="object")
 
+
+# =========================
+# PREP / PREPROCESS
+# =========================
 def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if df is None or df.empty:
-        return pd.DataFrame()
+        return pd.DataFrameلاحظ
 
     d = df.copy()
 
+    # Latest load only
     if "loaded_at" in d.columns and d["loaded_at"].notna().any():
         d["loaded_at"] = pd.to_datetime(d["loaded_at"], utc=True, errors="coerce")
         last_load = d["loaded_at"].max()
@@ -301,6 +329,7 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if c in d.columns:
             d[c] = pd.to_numeric(d[c], errors="coerce")
 
+    # Ensure columns
     if "zona" not in d.columns:
         d["zona"] = np.nan
     if "tms" not in d.columns:
@@ -310,10 +339,11 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if "humedad_pct" not in d.columns:
         d["humedad_pct"] = np.nan
 
+    # Hard required fields
     d = d.dropna(subset=["codigo", "au_gr_ton", "rec_pct"]).copy()
 
-    zones = params.get("zones", None)
-    zones_list = _parse_str_list(zones)
+    # Zone filter
+    zones_list = _parse_str_list(params.get("zones", None))
     if zones_list is not None and len(zones_list) > 0:
         zset = set([str(z).strip().casefold() for z in zones_list if str(z).strip() != ""])
         d["_zona_norm"] = d["zona"].astype(str).str.strip().str.casefold()
@@ -322,6 +352,7 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         if d.empty:
             return pd.DataFrame()
 
+    # Compute TMS if missing/bad and TMH+humedad exists
     d["tmh"] = pd.to_numeric(d["tmh"], errors="coerce")
     d["tms"] = pd.to_numeric(d["tms"], errors="coerce")
     d["humedad_pct"] = pd.to_numeric(d["humedad_pct"], errors="coerce")
@@ -333,24 +364,29 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
         (1 - d.loc[mask_tms_bad & mask_can_calc, "humedad_pct"] / 100.0)
     )
 
+    # tmh_eff = tmh if valid else tms
     d["tmh_eff"] = d["tmh"].where(d["tmh"].notna() & (d["tmh"] > 0), d["tms"])
 
+    # positive constraints
     d = d.dropna(subset=["tms"]).copy()
-    d = d[(d["tms"] > 0)].copy()
+    d = d[d["tms"] > 0].copy()
     d = d.dropna(subset=["tmh_eff"]).copy()
-    d = d[(d["tmh_eff"] > 0)].copy()
+    d = d[d["tmh_eff"] > 0].copy()
 
+    # lot_tms_min filter
     lot_tms_min = float(params.get("lot_tms_min", 0.0) or 0.0)
     if lot_tms_min > 0:
         d = d[d["tms"] >= lot_tms_min].copy()
         if d.empty:
             return pd.DataFrame()
 
+    # Ensure reag columns
     if "nacn_kg_t" not in d.columns:
         d["nacn_kg_t"] = np.nan
     if "naoh_kg_t" not in d.columns:
         d["naoh_kg_t"] = np.nan
 
+    # Ensure fines
     if "au_fino" not in d.columns:
         d["au_fino"] = np.nan
     if "ag_fino" not in d.columns:
@@ -367,6 +403,7 @@ def _prep_base(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 
     return d
 
+
 def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d = _prep_base(df, params)
     if d is None or d.empty:
@@ -375,8 +412,8 @@ def preprocess(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     lot_rec_min = float(params.get("lot_rec_min", 85.0))
     d = d[d["rec_pct"].notna()].copy()
     d = d[d["rec_pct"] >= lot_rec_min].copy()
-
     return d
+
 
 def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     d = _prep_base(df, params)
@@ -408,11 +445,16 @@ def build_rejects_lowrec(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFra
 
     return d[cols].copy()
 
+
+# =========================
+# METRICS / HELPERS
+# =========================
 def wavg(values: pd.Series, weights: pd.Series) -> float:
     w = pd.to_numeric(weights, errors="coerce").fillna(0).astype(float)
     v = pd.to_numeric(values, errors="coerce").fillna(0).astype(float)
     denom = float(w.sum())
     return float((v * w).sum() / denom) if denom > 0 else float("nan")
+
 
 def metrics(d: pd.DataFrame, pile_rec_min: float) -> dict:
     w = d["tms"].where(d["tms"].notna() & (d["tms"] > 0), d["tmh_eff"])
@@ -427,6 +469,7 @@ def metrics(d: pd.DataFrame, pile_rec_min: float) -> dict:
         "au_fino": float(pd.to_numeric(d["au_fino"], errors="coerce").fillna(0).sum()) if "au_fino" in d.columns else float("nan"),
     }
 
+
 def grade_ok(avg_g: float, gmin: float, gmax: float, gmin_exclusive: bool, gmax_inclusive: bool) -> bool:
     if math.isnan(avg_g):
         return False
@@ -440,10 +483,12 @@ def grade_ok(avg_g: float, gmin: float, gmax: float, gmin_exclusive: bool, gmax_
         return (avg_g <= gmax + 1e-9)
     return (avg_g < gmax - 1e-9)
 
+
 def reag_ok(avg_x: float, lo: float, hi: float) -> bool:
     if math.isnan(avg_x):
         return False
     return (avg_x >= lo - 1e-9) and (avg_x <= hi + 1e-9)
+
 
 def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
     if math.isnan(x):
@@ -454,6 +499,10 @@ def dist_to_band_scalar(x: float, lo: float, hi: float) -> float:
         return x - hi
     return 0.0
 
+
+# =========================
+# VARIOS (TRIM) + 2-ETAPAS REC
+# =========================
 def build_varios_trim(
     lots: pd.DataFrame,
     gmin: float,
@@ -476,9 +525,9 @@ def build_varios_trim(
             d[c] = np.nan
 
     d = d.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct"]).copy()
-    d = d[(d["tms"] > 0)].copy()
+    d = d[d["tms"] > 0].copy()
     d = d.dropna(subset=["tmh_eff"]).copy()
-    d = d[(d["tmh_eff"] > 0)].copy()
+    d = d[d["tmh_eff"] > 0].copy()
     if d.empty:
         return pd.DataFrame()
 
@@ -576,7 +625,6 @@ def build_varios_trim(
 
         new_tms = tms_tot - tms[idx]
         can_remove = (new_tms >= (tms_min - 1e-9)) & (new_tms > 0)
-
         if not np.any(can_remove):
             return pd.DataFrame()
 
@@ -628,11 +676,7 @@ def build_varios_trim(
         fine_loss = au_fino[idx]
         tms_loss = tms[idx]
 
-        ord_idx = np.lexsort((
-            fine_loss,
-            tms_loss,
-            pen2
-        ))
+        ord_idx = np.lexsort((fine_loss, tms_loss, pen2))
         pick_pos = int(ord_idx[0])
         j = int(idx[pick_pos])
 
@@ -658,6 +702,74 @@ def build_varios_trim(
     out["pile_type"] = "varios"
     return out
 
+
+def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """
+    VARIOS con enfoque 2 etapas (REC):
+    1) intenta SOLO con rec_pct >= pile_rec_min
+    2) si no sale, usa universo completo (ya filtrado por lot_rec_min en preprocess)
+    """
+    if lots is None or lots.empty:
+        return pd.DataFrame()
+
+    pile_rec_min = float(params["pile_rec_min"])
+
+    eligible = lots.copy()
+    eligible = eligible.dropna(subset=["codigo", "tms", "au_gr_ton", "rec_pct", "tmh_eff"]).copy()
+    eligible = eligible[(eligible["tms"] > 0) & (eligible["tmh_eff"] > 0)].copy()
+    if eligible.empty:
+        return pd.DataFrame()
+
+    g_tries = params.get("var_g_tries", DEFAULT_PARAMS["var_g_tries"])
+    tms_max = float(params["var_tms_max"])
+    tms_target = float(params["var_tms_target"])
+    tms_min = float(params["var_tms_min"])
+    reag_min = float(params["reag_min"])
+    reag_max = float(params["reag_max"])
+
+    def _try(eligible_in: pd.DataFrame, enforce_reagents: bool) -> pd.DataFrame:
+        if eligible_in is None or eligible_in.empty:
+            return pd.DataFrame()
+        for (gmin, gmax) in g_tries:
+            p = build_varios_trim(
+                lots=eligible_in,
+                gmin=float(gmin),
+                gmax=float(gmax),
+                enforce_reagents=enforce_reagents,
+                rec_min=pile_rec_min,
+                tms_max=tms_max,
+                tms_target=tms_target,
+                tms_min=tms_min,
+                reag_min=reag_min,
+                reag_max=reag_max,
+            )
+            if p is not None and not p.empty:
+                return p
+        return pd.DataFrame()
+
+    # Etapa 1: SOLO rec >= pile_rec_min
+    eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
+    p = _try(eligible_hi, enforce_reagents=True)
+    if not p.empty:
+        return p
+    p = _try(eligible_hi, enforce_reagents=False)
+    if not p.empty:
+        return p
+
+    # Etapa 2: universo completo
+    p = _try(eligible, enforce_reagents=True)
+    if not p.empty:
+        return p
+    p = _try(eligible, enforce_reagents=False)
+    if not p.empty:
+        return p
+
+    return pd.DataFrame()
+
+
+# =========================
+# SOLVER (BATCH)
+# =========================
 def solve_one_pile(
     lots: pd.DataFrame,
     pile_type: str,
@@ -953,7 +1065,13 @@ def solve_one_pile(
     best_sol["pile_type"] = pile_type
     return best_sol
 
+
 def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.DataFrame:
+    """
+    BATCH con enfoque 2 etapas (REC):
+    1) intenta SOLO con rec_pct >= pile_rec_min
+    2) si no se puede, usa universo completo (ya filtrado por lot_rec_min)
+    """
     pile_rec_min = float(params["pile_rec_min"])
     bat_lot_g_min = float(params.get("bat_lot_g_min", 0.0) or 0.0)
 
@@ -968,103 +1086,75 @@ def build_batch(lots: pd.DataFrame, params: Dict[str, Any], seed: int) -> pd.Dat
         if eligible.empty:
             return pd.DataFrame()
 
-    p = solve_one_pile(
-        lots=eligible,
-        pile_type="batch",
-        tms_max=float(params["bat_tms_max"]),
-        tms_target=float(params["bat_tms_target"]),
-        tms_min=float(params["bat_tms_min"]),
-        gmin=float(params["bat_pile_g_min"]),
-        gmax=1e9,
-        gmin_exclusive=False,
-        gmax_inclusive=True,
-        rec_min=pile_rec_min,
-        enforce_reagents=True,
-        reag_min=float(params["reag_min"]),
-        reag_max=float(params["reag_max"]),
-        n_iters=int(params["batch_n_iters_hard"]),
-        max_steps=int(params["batch_max_steps"]),
-        cand_sample=int(params["batch_cand_sample"]),
-        reseeds_per_iter=int(params["batch_reseeds"]),
-        seed=seed,
-        pair_topk=int(params["batch_pair_topk"]),
-        pair_pool=int(params["batch_pair_pool"]),
-    )
-    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
-        return p
+    def _try(eligible_in: pd.DataFrame, seed_in: int) -> pd.DataFrame:
+        if eligible_in is None or eligible_in.empty:
+            return pd.DataFrame()
 
-    p = solve_one_pile(
-        lots=eligible,
-        pile_type="batch",
-        tms_max=float(params["bat_tms_max"]),
-        tms_target=float(params["bat_tms_target"]),
-        tms_min=float(params["bat_tms_min"]),
-        gmin=float(params["bat_pile_g_min"]),
-        gmax=1e9,
-        gmin_exclusive=False,
-        gmax_inclusive=True,
-        rec_min=pile_rec_min,
-        enforce_reagents=False,
-        reag_min=float(params["reag_min"]),
-        reag_max=float(params["reag_max"]),
-        n_iters=int(params["batch_n_iters_soft"]),
-        max_steps=int(params["batch_max_steps"]),
-        cand_sample=int(params["batch_cand_sample"]),
-        reseeds_per_iter=int(params["batch_reseeds"]),
-        seed=seed + 1000,
-        pair_topk=int(params["batch_pair_topk"]),
-        pair_pool=int(params["batch_pair_pool"]),
-    )
-    if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
-        return p
-
-    return pd.DataFrame()
-
-def build_varios(lots: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    pile_rec_min = float(params["pile_rec_min"])
-    var_tms_min = float(params["var_tms_min"])
-    var_tms_max = float(params["var_tms_max"])
-
-    var_g_tries: List[Tuple[float, float]] = list(params["var_g_tries"])
-
-    for (gmin, gmax) in var_g_tries:
-        p = build_varios_trim(
-            lots=lots,
-            gmin=float(gmin),
-            gmax=float(gmax),
+        p = solve_one_pile(
+            lots=eligible_in,
+            pile_type="batch",
+            tms_max=float(params["bat_tms_max"]),
+            tms_target=float(params["bat_tms_target"]),
+            tms_min=float(params["bat_tms_min"]),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            rec_min=pile_rec_min,
             enforce_reagents=True,
-            rec_min=pile_rec_min,
-            tms_max=float(params["var_tms_max"]),
-            tms_target=float(params["var_tms_target"]),
-            tms_min=float(params["var_tms_min"]),
             reag_min=float(params["reag_min"]),
             reag_max=float(params["reag_max"]),
+            n_iters=int(params["batch_n_iters_hard"]),
+            max_steps=int(params["batch_max_steps"]),
+            cand_sample=int(params["batch_cand_sample"]),
+            reseeds_per_iter=int(params["batch_reseeds"]),
+            seed=seed_in,
+            pair_topk=int(params["batch_pair_topk"]),
+            pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty:
-            m = metrics(p, pile_rec_min=pile_rec_min)
-            if m["tms"] >= var_tms_min - 1e-9 and m["tms"] <= var_tms_max + 1e-9:
-                return p
+        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
+            return p
 
-    for (gmin, gmax) in var_g_tries:
-        p = build_varios_trim(
-            lots=lots,
-            gmin=float(gmin),
-            gmax=float(gmax),
+        p = solve_one_pile(
+            lots=eligible_in,
+            pile_type="batch",
+            tms_max=float(params["bat_tms_max"]),
+            tms_target=float(params["bat_tms_target"]),
+            tms_min=float(params["bat_tms_min"]),
+            gmin=float(params["bat_pile_g_min"]),
+            gmax=1e9,
+            gmin_exclusive=False,
+            gmax_inclusive=True,
+            rec_min=pile_rec_min,
             enforce_reagents=False,
-            rec_min=pile_rec_min,
-            tms_max=float(params["var_tms_max"]),
-            tms_target=float(params["var_tms_target"]),
-            tms_min=float(params["var_tms_min"]),
             reag_min=float(params["reag_min"]),
             reag_max=float(params["reag_max"]),
+            n_iters=int(params["batch_n_iters_soft"]),
+            max_steps=int(params["batch_max_steps"]),
+            cand_sample=int(params["batch_cand_sample"]),
+            reseeds_per_iter=int(params["batch_reseeds"]),
+            seed=seed_in + 1000,
+            pair_topk=int(params["batch_pair_topk"]),
+            pair_pool=int(params["batch_pair_pool"]),
         )
-        if not p.empty:
-            m = metrics(p, pile_rec_min=pile_rec_min)
-            if m["tms"] >= var_tms_min - 1e-9 and m["tms"] <= var_tms_max + 1e-9:
-                return p
+        if not p.empty and metrics(p, pile_rec_min=pile_rec_min)["tms"] >= float(params["bat_tms_min"]) - 1e-9:
+            return p
 
-    return pd.DataFrame()
+        return pd.DataFrame()
 
+    # Etapa 1: SOLO rec >= pile_rec_min
+    eligible_hi = eligible[eligible["rec_pct"] >= pile_rec_min].copy()
+    p = _try(eligible_hi, seed)
+    if not p.empty:
+        return p
+
+    # Etapa 2: universo completo
+    return _try(eligible, seed)
+
+
+# =========================
+# SOLVE
+# =========================
 def solve(
     df_raw: pd.DataFrame,
     payload: Optional[Dict[str, Any]] = None
@@ -1077,10 +1167,12 @@ def solve(
     if df.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), rej_lowrec
 
+    # OUTPUT 1: 1 pila varios (2 etapas ya dentro)
     p1 = build_varios(df, params).copy()
     if not p1.empty:
         p1["pile_code"] = 1
 
+    # OUTPUT 2: N pilas batch (cada batch con 2 etapas ya dentro)
     remaining = df.copy()
     batch_piles = []
     pile_idx = 1
@@ -1100,6 +1192,7 @@ def solve(
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
 
+    # OUTPUT 3: mix (varios + batch) usando mismo df, con 2 etapas en ambos
     rem_mix = df.copy()
 
     mix_varios = build_varios(rem_mix, params).copy()
@@ -1114,6 +1207,7 @@ def solve(
 
     p3 = pd.concat([mix_varios, mix_batch], ignore_index=True)
 
+    # remove used from rejects
     used_all = set()
     for _df in [p1, p2, p3]:
         if _df is not None and not _df.empty and "codigo" in _df.columns:

@@ -179,11 +179,24 @@ function DataTable({
   selected,
   onToggle,
   onSetMany,
+
+  // ✅ DnD
+  dndEnabled,
+  viewKey,
+  pileCode,
+  pileType,
+  onMoveRow,
 }: {
   rows: LotRow[];
   selected: SelectedMap;
   onToggle: (rowKey: string) => void;
   onSetMany: (rowKeys: string[], value: boolean) => void;
+
+  dndEnabled?: boolean;
+  viewKey?: ViewKey;
+  pileCode?: number;
+  pileType?: PileType;
+  onMoveRow?: (args: { view: ViewKey; rowKey: string; toPileCode: number; toPileType: PileType }) => void;
 }) {
   type SortDir = "asc" | "desc";
   const [sort, setSort] = useState<{ key: ColKey; dir: SortDir } | null>(null);
@@ -312,8 +325,35 @@ function DataTable({
     return sort.dir === "asc" ? " ▲" : " ▼";
   };
 
+  // ✅ drop handler (mover fila entre pilas)
+  const handleDrop = (e: React.DragEvent) => {
+    if (!dndEnabled || !onMoveRow || !viewKey || pileCode == null || !pileType) return;
+    e.preventDefault();
+
+    const raw = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain") || "";
+    if (!raw) return;
+
+    try {
+      const p = JSON.parse(raw) as { view: ViewKey; rowKey: string; fromPileCode: number; fromPileType: PileType };
+      if (!p?.rowKey || p.view !== viewKey) return;
+
+      if (p.fromPileCode === pileCode && p.fromPileType === pileType) return;
+
+      onMoveRow({ view: viewKey, rowKey: p.rowKey, toPileCode: pileCode, toPileType: pileType });
+    } catch {}
+  };
+
   return (
-    <div style={wrapStyle}>
+    <div
+      style={wrapStyle}
+      onDragOver={(e) => {
+        if (!dndEnabled) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={handleDrop}
+      title={dndEnabled ? "Arrastra un lote y suéltalo aquí para moverlo a esta pila" : undefined}
+    >
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr>
@@ -360,13 +400,25 @@ function DataTable({
           {sortedRows.map((r, i) => {
             const k = r._k || `${i}`;
             const isSel = selected[k] !== false; // default true
+
             return (
               <tr
                 key={k}
+                draggable={!!dndEnabled}
+                onDragStart={(e) => {
+                  if (!dndEnabled || !viewKey || pileCode == null || !pileType) return;
+                  const payload = { view: viewKey, rowKey: k, fromPileCode: pileCode, fromPileType: pileType };
+                  const s = JSON.stringify(payload);
+                  e.dataTransfer.setData("application/json", s);
+                  e.dataTransfer.setData("text/plain", s);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
                 style={{
                   borderBottom: "1px solid rgba(255,255,255,.08)",
                   opacity: isSel ? 1 : 0.45,
+                  cursor: dndEnabled ? "grab" : "default",
                 }}
+                title={dndEnabled ? "Arrastra este lote a otra pila" : undefined}
               >
                 <td style={tdStyle}>
                   <input
@@ -438,7 +490,6 @@ function DataTable({
     </div>
   );
 }
-
 
 function DataTableLowRec({
   rows,
@@ -708,7 +759,6 @@ function DataTableLowRec({
   );
 }
 
-
 /** Defaults (solo placeholder/hint en UI) */
 const DEFAULTS = {
   lot_tms_min: 0, // ✅ ahora TMS
@@ -934,7 +984,9 @@ function ZoneDropdown({
         </div>
       )}
 
-      <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Default: todas seleccionadas. Si quitas una, filtra.</span>
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+        Default: todas seleccionadas. Si quitas una, filtra.
+      </span>
     </div>
   );
 }
@@ -1208,6 +1260,21 @@ export default function Home() {
     });
   }
 
+  // ✅ mover lote entre pilas (solo view 2/3)
+  function moveRowBetweenPiles(args: { view: ViewKey; rowKey: string; toPileCode: number; toPileType: PileType }) {
+    const { view, rowKey, toPileCode, toPileType } = args;
+
+    if (view === "2") {
+      setR2((prev) => prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r)));
+      return;
+    }
+
+    if (view === "3") {
+      setR3((prev) => prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r)));
+      return;
+    }
+  }
+
   async function loadZones() {
     setZonesLoading(true);
     try {
@@ -1385,7 +1452,7 @@ export default function Home() {
   const g2 = useMemo(() => groupByPile(r2), [r2]);
   const g3 = useMemo(() => groupByPile(r3), [r3]);
 
-  // ✅ Baja recuperación agrupada por clasificación (para web) - pero usando SOLO seleccionados para KPIs/footers
+  // ✅ Baja recuperación agrupada por clasificación (para web)
   const lowRecGroups = useMemo(() => {
     return groupLowRecByClass(r4).filter((g) => g.rows.length > 0);
   }, [r4]);
@@ -2149,7 +2216,9 @@ export default function Home() {
           />
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>Usa los filtros del reporte para validar el universo de lotes disponible.</div>
+        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
+          Usa los filtros del reporte para validar el universo de lotes disponible.
+        </div>
       </section>
 
       {/* Panel de parámetros + botón Calcular */}
@@ -2184,7 +2253,9 @@ export default function Home() {
             </button>
 
             {calcMsg && (
-              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>{calcMsg}</span>
+              <span style={{ fontWeight: 700, color: calcMsg.startsWith("❌") ? "#FFD6D6" : "rgba(255,255,255,.9)" }}>
+                {calcMsg}
+              </span>
             )}
 
             <span style={{ fontSize: 12, color: "rgba(255,255,255,.70)" }}>Si dejas vacío, usa el default.</span>
@@ -2196,7 +2267,13 @@ export default function Home() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
           <ZoneDropdown zones={zonesAll} selected={zonesSelected} onToggle={toggleZone} onSelectAll={selectAllZones} />
 
-          <InputRow label="TMS mínimo de Lote" value={lot_tms_min} onChange={setLotTmsMin} placeholder={`${DEFAULTS.lot_tms_min}`} hint="0 = no filtra" />
+          <InputRow
+            label="TMS mínimo de Lote"
+            value={lot_tms_min}
+            onChange={setLotTmsMin}
+            placeholder={`${DEFAULTS.lot_tms_min}`}
+            hint="0 = no filtra"
+          />
 
           <InputRow
             label="Recuperación Mínima de Lote (%)"
@@ -2328,6 +2405,12 @@ export default function Home() {
                   selected={sel[view] ?? {}}
                   onToggle={(k) => toggleRowSelection(view, k)}
                   onSetMany={(keys, v) => setManySelection(view, keys, v)}
+                  // ✅ habilitado solo en Resultado 2/3
+                  dndEnabled={view === "2" || view === "3"}
+                  viewKey={view}
+                  pileCode={pile_code}
+                  pileType={pile_type}
+                  onMoveRow={moveRowBetweenPiles}
                 />
               </div>
             );

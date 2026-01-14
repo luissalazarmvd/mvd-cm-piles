@@ -1654,6 +1654,68 @@ setSelU((prev) => ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authorized]);
 
+    // ✅ AUTO-SCROLL mientras haces drag & drop (scroll de la página)
+  const dndScrollRaf = useRef<number | null>(null);
+
+  useEffect(() => {
+    const EDGE = 90;      // px desde borde para activar scroll
+    const MAX_SPEED = 28; // px por frame aprox
+
+    function stopRaf() {
+      if (dndScrollRaf.current != null) {
+        cancelAnimationFrame(dndScrollRaf.current);
+        dndScrollRaf.current = null;
+      }
+    }
+
+    function onDragOver(e: DragEvent) {
+      // Solo cuando el drag viene de tu app (tú seteas application/json en onDragStart)
+      const types = Array.from(e.dataTransfer?.types ?? []);
+      if (!types.includes("application/json")) return;
+
+      const y = e.clientY;
+      const h = window.innerHeight;
+
+      let delta = 0;
+
+      if (y < EDGE) {
+        // más cerca al borde => más rápido
+        const t = (EDGE - y) / EDGE; // 0..1
+        delta = -Math.ceil(6 + t * (MAX_SPEED - 6));
+      } else if (y > h - EDGE) {
+        const t = (y - (h - EDGE)) / EDGE;
+        delta = Math.ceil(6 + t * (MAX_SPEED - 6));
+      } else {
+        stopRaf();
+        return;
+      }
+
+      // throttle con RAF para que no sea brusco
+      if (dndScrollRaf.current == null) {
+        dndScrollRaf.current = requestAnimationFrame(() => {
+          window.scrollBy(0, delta);
+          dndScrollRaf.current = null;
+        });
+      }
+    }
+
+    function onDragEnd() {
+      stopRaf();
+    }
+
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragend", onDragEnd);
+    document.addEventListener("drop", onDragEnd);
+
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragend", onDragEnd);
+      document.removeEventListener("drop", onDragEnd);
+      stopRaf();
+    };
+  }, []);
+
+
   // ✅ toggle zonas (evita quedarse en 0 seleccionadas)
   function toggleZone(z: string) {
     setZonesSelected((prev) => {

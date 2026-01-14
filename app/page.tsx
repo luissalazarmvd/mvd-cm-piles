@@ -1201,7 +1201,37 @@ function UniverseTable({
   });
 }, [zones]);
 
-  const [tmhMin, setTmhMin] = useState("");
+// ✅ selección para universo (default todo true)
+const [selUni, setSelUni] = useState<SelectedMap>({});
+
+function toggleUni(rowKey: string) {
+  setSelUni((prev) => {
+    const nextVal = prev[rowKey] === false ? true : false; // default true -> false
+    return { ...prev, [rowKey]: nextVal };
+  });
+}
+
+function setManyUni(rowKeys: string[], value: boolean) {
+  setSelUni((prev) => {
+    const cur = { ...prev };
+    for (const k of rowKeys) cur[k] = value;
+    return cur;
+  });
+}
+
+// ✅ cuando cambian filas (uniRows), inicializa selección en true sin reventar lo ya tocado
+useEffect(() => {
+  setSelUni((prev) => {
+    const next = { ...prev };
+    for (const r of rows ?? []) {
+      if (r._k && next[r._k] === undefined) next[r._k] = true;
+    }
+    return next;
+  });
+}, [rows]);
+  
+
+const [tmhMin, setTmhMin] = useState("");
   const [tmhMax, setTmhMax] = useState("");
   const [auMin, setAuMin] = useState("");
   const [auMax, setAuMax] = useState("");
@@ -1236,7 +1266,9 @@ function UniverseTable({
     const _nacnMin = num(nacnMin), _nacnMax = num(nacnMax);
 
     return (rows ?? []).filter((r) => {
-      if (zonesSel.length > 0 && r.zona && !zSet.has(String(r.zona))) return false;
+      const useZoneFilter = zonesSel.length > 0 && zonesSel.length < zones.length;
+      if (useZoneFilter && r.zona && !zSet.has(String(r.zona))) return false;
+
 
       if (!inRange(r.tmh, _tmhMin, _tmhMax)) return false;
       if (!inRange(r.au_gr_ton, _auMin, _auMax)) return false;
@@ -1374,54 +1406,14 @@ function UniverseTable({
         </div>
       </div>
 
-      <div style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,.25)", overflow: "auto", maxHeight: 520, background: "rgba(0,0,0,.10)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr>
-              <th style={th}>#</th>
-              <th style={th}>Código</th>
-              <th style={th}>Zona</th>
-              <th style={th}>TMH</th>
-              <th style={th}>Au (g/t)</th>
-              <th style={th}>Cu (%)</th>
-              <th style={th}>Rec (%)</th>
-              <th style={th}>NaOH (kg/t)</th>
-              <th style={th}>NaCN (kg/t)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && filtered.length === 0 && (
-              <tr>
-                <td colSpan={9} style={{ padding: 10, color: "rgba(255,255,255,.75)" }}>
-                  Cargando...
-                </td>
-              </tr>
-            )}
+      <DataTable
+  rows={filtered}
+  selected={selUni}
+  onToggle={toggleUni}
+  onSetMany={setManyUni}
+  dndEnabled={false}
+/>
 
-            {filtered.map((r, i) => (
-              <tr key={r._k || `${i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
-                <td style={td}>{i + 1}</td>
-                <td style={td}>{r.codigo ?? ""}</td>
-                <td style={td}>{r.zona ?? ""}</td>
-                <td style={td}>{fmt(r.tmh, 2)}</td>
-                <td style={td}>{fmt(r.au_gr_ton, 2)}</td>
-                <td style={td}>{fmt(r.cu_pct, 2)}</td>
-                <td style={td}>{fmt(r.rec_pct, 2)}</td>
-                <td style={td}>{fmt(r.naoh_kg_t, 2)}</td>
-                <td style={td}>{fmt(r.nacn_kg_t, 2)}</td>
-              </tr>
-            ))}
-
-            {!loading && filtered.length === 0 && (
-              <tr>
-                <td colSpan={9} style={{ padding: 10, color: "rgba(255,255,255,.75)" }}>
-                  Sin filas para esos filtros.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
@@ -1465,8 +1457,18 @@ const [selU, setSelU] = useState<Record<ViewKey, SelectedMap>>({
   "4": {},
 });
 
+// ✅ slots de pilas para que no desaparezcan al quedar vacías
+const [pileSlots, setPileSlots] = useState<
+  Record<ViewKey, Array<{ pile_code: number; pile_type: PileType }>>
+>({
+  "1": [],
+  "2": [],
+  "3": [],
+  "4": [],
+});
 
-  const [view, setView] = useState<ViewKey>("1");
+  
+const [view, setView] = useState<ViewKey>("1");
 
   // ===== ZONAS =====
   const [zonesAll, setZonesAll] = useState<string[]>([]);
@@ -1824,6 +1826,23 @@ try {
       const rows1 = addKeysToRows("1", Array.isArray(ja?.rows) ? ja.rows : []);
       const rows2 = addKeysToRows("2", Array.isArray(jb?.rows) ? jb.rows : []);
       const rows3 = addKeysToRows("3", Array.isArray(jc?.rows) ? jc.rows : []);
+      const slots1 = groupByPile(rows1).map((p) => ({ pile_code: p.pile_code, pile_type: p.pile_type }));
+const slots2 = groupByPile(rows2).map((p) => ({ pile_code: p.pile_code, pile_type: p.pile_type }));
+const slots3 = groupByPile(rows3).map((p) => ({ pile_code: p.pile_code, pile_type: p.pile_type }));
+
+const uniqSlots = (arr: Array<{ pile_code: number; pile_type: PileType }>) => {
+  const m = new Map<string, { pile_code: number; pile_type: PileType }>();
+  for (const x of arr) m.set(`${x.pile_code}__${x.pile_type}`, x);
+  return Array.from(m.values()).sort((a, b) => a.pile_code - b.pile_code || a.pile_type.localeCompare(b.pile_type));
+};
+
+setPileSlots((prev) => ({
+  ...prev,
+  "1": uniqSlots([...(prev["1"] ?? []), ...slots1]),
+  "2": uniqSlots([...(prev["2"] ?? []), ...slots2]),
+  "3": uniqSlots([...(prev["3"] ?? []), ...slots3]),
+}));
+
 
       setR1(rows1);
       setR2(rows2);
@@ -2978,50 +2997,61 @@ setSelU((prev) => ({
           </>
         )}
 
-        {/* ✅ Resultados 1/2/3 */}
-        {view !== "4" &&
-          current.map(({ pile_code, pile_type, lotes }) => {
-            const lotesSel = filterSelected(lotes, sel[view] ?? {});
-            const k = pileKPIs(lotesSel);
-            const total = lotes.length;
-            const selCount = lotesSel.length;
+        {/* ✅ Resultados 1/2/3 (con slots para que no desaparezcan) */}
+{view !== "4" && (() => {
+  const slots =
+    pileSlots[view] && pileSlots[view].length > 0
+      ? pileSlots[view]
+      : current.map((p) => ({ pile_code: p.pile_code, pile_type: p.pile_type }));
 
-            return (
-              <div
-                key={`${pile_code}-${pile_type}`}
-                style={{
-                  marginBottom: 14,
-                  background: "#004F86",
-                  padding: 12,
-                  borderRadius: 10,
-                  border: "1px solid rgba(255,255,255,.12)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                  <b>
-                    Pila #{pile_code} ({pile_type}) — Sel {selCount}/{total}
-                  </b>
+  const map = new Map<string, LotRow[]>();
+  for (const p of current) map.set(`${p.pile_code}__${p.pile_type}`, p.lotes);
 
-                  <span style={{ color: "rgba(255,255,255,.85)" }}>
-                    TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
-                  </span>
-                </div>
+  return slots.map(({ pile_code, pile_type }) => {
+    const lotes = map.get(`${pile_code}__${pile_type}`) ?? [];
 
-                <DataTable
-                  rows={lotes}
-                  selected={sel[view] ?? {}}
-                  onToggle={(k) => toggleRowSelection(view, k)}
-                  onSetMany={(keys, v) => setManySelection(view, keys, v)}
-                  // ✅ habilitado solo en Resultado 2/3
-                  dndEnabled={view === "1" || view === "2" || view === "3"}
-                  viewKey={view}
-                  pileCode={pile_code}
-                  pileType={pile_type}
-                  onMoveRow={moveRowBetweenPiles}
-                />
-              </div>
-            );
-          })}
+    const lotesSel = filterSelected(lotes, sel[view] ?? {});
+    const k = pileKPIs(lotesSel);
+    const total = lotes.length;
+    const selCount = lotesSel.length;
+
+    return (
+      <div
+        key={`${pile_code}-${pile_type}`}
+        style={{
+          marginBottom: 14,
+          background: "#004F86",
+          padding: 12,
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,.12)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+          <b>
+            Pila #{pile_code} ({pile_type}) — Sel {selCount}/{total}
+          </b>
+
+          <span style={{ color: "rgba(255,255,255,.85)" }}>
+            TMS={fmt(k.tmsSum, 1)} | Au={fmt(k.auWeighted, 2)} g/t | Hum={fmt(k.humWeighted, 2)}% | Rec={fmt(k.recWeighted, 2)}%
+          </span>
+        </div>
+
+        <DataTable
+          rows={lotes}
+          selected={sel[view] ?? {}}
+          onToggle={(k) => toggleRowSelection(view, k)}
+          onSetMany={(keys, v) => setManySelection(view, keys, v)}
+          dndEnabled={view === "1" || view === "2" || view === "3"}
+          viewKey={view}
+          pileCode={pile_code}
+          pileType={pile_type}
+          onMoveRow={moveRowBetweenPiles}
+        />
+      </div>
+    );
+  });
+})()}
+
 
         {view !== "4" && (
   <div

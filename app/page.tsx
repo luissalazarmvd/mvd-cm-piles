@@ -1230,6 +1230,8 @@ const [selU, setSelU] = useState<Record<ViewKey, SelectedMap>>({
 
   const [etlLoading, setEtlLoading] = useState(false);
 
+  const busyCalc = calcLoading;
+
   useEffect(() => {
     try {
       if (sessionStorage.getItem("mvd_auth") === "ok") setAuthorized(true);
@@ -1761,6 +1763,7 @@ setSelU((prev) => ({
       <button
         key={k}
         onClick={() => setView(k)}
+        disabled={busyCalc}
         style={{
           padding: "8px 12px",
           borderRadius: 999,
@@ -1768,8 +1771,9 @@ setSelU((prev) => ({
           background: active ? "rgba(255,255,255,.18)" : "rgba(0,0,0,.10)",
           color: "white",
           fontWeight: 700,
-          cursor: "pointer",
+          cursor: busyCalc ? "not-allowed" : "pointer",
           whiteSpace: "nowrap",
+          opacity: busyCalc ? 0.75 : 1,
         }}
       >
         {label}
@@ -2367,6 +2371,65 @@ setSelU((prev) => ({
         minHeight: "100vh",
       }}
     >
+            {/* ✅ OVERLAY CALCULANDO */}
+      {busyCalc && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0, 103, 172, 0.78)", // #0067ac con transparencia
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "column",
+            gap: 14,
+          }}
+          aria-label="Calculando"
+        >
+          <img
+            src="/export_logo.png"
+            alt="Calculando"
+            className="mvd-pulse"
+            style={{
+              width: 220,
+              maxWidth: "70vw",
+              height: "auto",
+              filter: "drop-shadow(0 10px 24px rgba(0,0,0,.35))",
+            }}
+          />
+
+          <div style={{ textAlign: "center", maxWidth: 520, padding: "0 18px" }}>
+            <div style={{ fontWeight: 900, fontSize: 16 }}>
+              Calculando. Este proceso puede tardar unos segundos.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ animación pulse (solo para overlay) */}
+      <style jsx global>{`
+        .mvd-pulse {
+          animation: mvdPulse 1.05s ease-in-out infinite;
+          transform-origin: center;
+        }
+        @keyframes mvdPulse {
+          0% {
+            transform: scale(0.92);
+            opacity: 0.92;
+          }
+          50% {
+            transform: scale(1.03);
+            opacity: 1;
+          }
+          100% {
+            transform: scale(0.92);
+            opacity: 0.92;
+          }
+        }
+      `}</style>
+
+      
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -2377,7 +2440,7 @@ setSelU((prev) => ({
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button
             onClick={loadAll}
-            disabled={loading}
+            disabled={loading || busyCalc}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -2394,7 +2457,7 @@ setSelU((prev) => ({
 
           <button
             onClick={runETL}
-            disabled={etlLoading}
+            disabled={etlLoading || busyCalc}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -2412,7 +2475,7 @@ setSelU((prev) => ({
 
           <button
             onClick={exportCurrentToPDF}
-            disabled={exportPdfLoading}
+            disabled={exportPdfLoading || busyCalc}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -2430,7 +2493,7 @@ setSelU((prev) => ({
 
           <button
             onClick={exportCurrentToExcel}
-            disabled={exportExcelLoading}
+            disabled={exportExcelLoading || busyCalc}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -2448,6 +2511,7 @@ setSelU((prev) => ({
 
           <button
             onClick={handleLogout}
+            disabled={busyCalc}
             style={{
               padding: "8px 12px",
               borderRadius: 8,
@@ -2455,7 +2519,8 @@ setSelU((prev) => ({
               background: "#A7D8FF",
               color: "#003A63",
               fontWeight: "bold",
-              cursor: "pointer",
+              cursor: busyCalc ? "not-allowed" : "pointer",
+              opacity: busyCalc ? 0.75 : 1,
               whiteSpace: "nowrap",
             }}
           >

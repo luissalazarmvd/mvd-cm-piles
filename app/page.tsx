@@ -2388,7 +2388,7 @@ setSelU((prev) => ({
           aria-label="Calculando"
         >
           <img
-            src="/export_logo.png"
+            src="/loading.png"
             alt="Calculando"
             className="mvd-pulse"
             style={{

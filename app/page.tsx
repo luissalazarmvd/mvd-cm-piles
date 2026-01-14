@@ -53,10 +53,42 @@ type LotRow = {
   created_at?: string;
 };
 
-function n(x: any): number {
-  const v = typeof x === "number" ? x : Number(x);
-  return Number.isFinite(v) ? v : 0;
+function parseNum(x: any): number | undefined {
+  if (x === null || x === undefined || x === "") return undefined;
+  if (typeof x === "number") return Number.isFinite(x) ? x : undefined;
+
+  let s = String(x).trim();
+  if (!s) return undefined;
+
+  // si tiene , y . decidir cuál es decimal por la última aparición
+  const hasComma = s.includes(",");
+  const hasDot = s.includes(".");
+
+  if (hasComma && hasDot) {
+    // 12,686.51  -> decimal = dot  => quitar comas
+    // 12.686,51  -> decimal = comma=> quitar dots y convertir comma a dot
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) {
+      s = s.replace(/\./g, "").replace(/,/g, ".");
+    } else {
+      s = s.replace(/,/g, "");
+    }
+  } else if (hasComma && !hasDot) {
+    // 4,15 -> decimal comma
+    s = s.replace(/,/g, ".");
+  } else {
+    // 12,686 -> podría ser miles => quitar comas
+    s = s.replace(/,/g, "");
+  }
+
+  const v = Number(s);
+  return Number.isFinite(v) ? v : undefined;
 }
+
+function n(x: any): number {
+  const v = parseNum(x);
+  return v ?? 0;
+}
+
 
 // ✅ separador miles con coma (12,686.51)
 function fmt(x: any, d = 2) {
@@ -1518,11 +1550,7 @@ const sFixed = (v?: number, d = 2) => (v == null ? "" : Number(v).toFixed(d));
 
 // ✅ min/max reales por campo (ignora null/""/NaN)
 const ranges = useMemo(() => {
-  const toNumOpt = (x: any): number | undefined => {
-    if (x === null || x === undefined || x === "") return undefined;
-    const v = typeof x === "number" ? x : Number(String(x).replace(/,/g, ""));
-    return Number.isFinite(v) ? v : undefined;
-  };
+  const toNumOpt = (x: any): number | undefined => parseNum(x);
 
   const mm = (get: (r: LotRow) => any) => {
     let min = Infinity;
@@ -1560,52 +1588,22 @@ const ranges = useMemo(() => {
 }, [rows]);
 
 // ✅ init: si todo está vacío, setea defaults min/max reales
-useEffect(() => {
-  if (!rows || rows.length === 0) return;
 
-  const allEmpty = [
-    tmhMin, tmhMax, auMin, auMax, cuMin, cuMax,
-    recMin, recMax, naohMin, naohMax, nacnMin, nacnMax,
-  ].every((x) => (x ?? "").trim() === "");
-
-  if (!allEmpty) return;
-
-  setTmhMin(ranges.tmh.minInput);
-  setTmhMax(ranges.tmh.maxInput);
-
-  setAuMin(ranges.au.minInput);
-  setAuMax(ranges.au.maxInput);
-
-  setCuMin(ranges.cu.minInput);
-  setCuMax(ranges.cu.maxInput);
-
-  setRecMin(ranges.rec.minInput);
-  setRecMax(ranges.rec.maxInput);
-
-  setNaohMin(ranges.naoh.minInput);
-  setNaohMax(ranges.naoh.maxInput);
-
-  setNacnMin(ranges.nacn.minInput);
-  setNacnMax(ranges.nacn.maxInput);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [rows, ranges]);
-
-
-  const num = (s: string) => {
-  const t = (s ?? "").trim();
-  if (!t) return undefined;              // ✅ vacío => undefined
-  const cleaned = t.replace(/,/g, "");   // ✅ por si pegan con comas
-  const v = Number(cleaned);
-  return Number.isFinite(v) ? v : undefined;
-};
-
+  const num = (s: string): number | undefined => parseNum(s);
 
   const inRange = (x: any, min?: number, max?: number) => {
-    const v = n(x);
-    if (min != null && v < min) return false;
-    if (max != null && v > max) return false;
-    return true;
-  };
+  const v = parseNum(x);
+  // si el usuario no puso min/max, no filtra aunque v sea undefined
+  if (min == null && max == null) return true;
+
+  // si sí puso min/max pero el dato no existe, se excluye
+  if (v == null) return false;
+
+  if (min != null && v < min) return false;
+  if (max != null && v > max) return false;
+  return true;
+};
+
 
   const filtered = useMemo(() => {
     const zSet = new Set(zonesSel);
@@ -1644,15 +1642,17 @@ useEffect(() => {
   };
 
   const reset = () => {
-  setZonesSel(zones);
+  setZonesSel(zones); // default: todas
 
-  setTmhMin(ranges.tmh.minInput); setTmhMax(ranges.tmh.maxInput);
-  setAuMin(ranges.au.minInput);   setAuMax(ranges.au.maxInput);
-  setCuMin(ranges.cu.minInput);   setCuMax(ranges.cu.maxInput);
-  setRecMin(ranges.rec.minInput); setRecMax(ranges.rec.maxInput);
-  setNaohMin(ranges.naoh.minInput); setNaohMax(ranges.naoh.maxInput);
-  setNacnMin(ranges.nacn.minInput); setNacnMax(ranges.nacn.maxInput);
+  // filtros vacíos => NO filtra
+  setTmhMin(""); setTmhMax("");
+  setAuMin("");  setAuMax("");
+  setCuMin("");  setCuMax("");
+  setRecMin(""); setRecMax("");
+  setNaohMin(""); setNaohMax("");
+  setNacnMin(""); setNacnMax("");
 };
+
 
 
   const th: React.CSSProperties = {

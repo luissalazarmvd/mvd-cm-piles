@@ -1173,6 +1173,250 @@ function addKeysToRows(view: ViewKey, rows: LotRow[]) {
   });
 }
 
+function UniverseTable({
+  rows,
+  loading,
+}: {
+  rows: LotRow[];
+  loading: boolean;
+}) {
+  const zones = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of rows) if (r.zona) s.add(String(r.zona));
+    return Array.from(s).sort((a, b) => a.localeCompare(b, "es"));
+  }, [rows]);
+
+  const [zonesSel, setZonesSel] = useState<string[]>([]);
+  useEffect(() => {
+    setZonesSel((prev) => (prev.length ? prev : zones));
+  }, [zones]);
+
+  const [tmhMin, setTmhMin] = useState("");
+  const [tmhMax, setTmhMax] = useState("");
+  const [auMin, setAuMin] = useState("");
+  const [auMax, setAuMax] = useState("");
+  const [cuMin, setCuMin] = useState("");
+  const [cuMax, setCuMax] = useState("");
+  const [recMin, setRecMin] = useState("");
+  const [recMax, setRecMax] = useState("");
+  const [naohMin, setNaohMin] = useState("");
+  const [naohMax, setNaohMax] = useState("");
+  const [nacnMin, setNacnMin] = useState("");
+  const [nacnMax, setNacnMax] = useState("");
+
+  const num = (s: string) => {
+    const v = Number((s ?? "").trim());
+    return Number.isFinite(v) ? v : undefined;
+  };
+
+  const inRange = (x: any, min?: number, max?: number) => {
+    const v = n(x);
+    if (min != null && v < min) return false;
+    if (max != null && v > max) return false;
+    return true;
+  };
+
+  const filtered = useMemo(() => {
+    const zSet = new Set(zonesSel);
+    const _tmhMin = num(tmhMin), _tmhMax = num(tmhMax);
+    const _auMin = num(auMin), _auMax = num(auMax);
+    const _cuMin = num(cuMin), _cuMax = num(cuMax);
+    const _recMin = num(recMin), _recMax = num(recMax);
+    const _naohMin = num(naohMin), _naohMax = num(naohMax);
+    const _nacnMin = num(nacnMin), _nacnMax = num(nacnMax);
+
+    return (rows ?? []).filter((r) => {
+      if (zonesSel.length > 0 && r.zona && !zSet.has(String(r.zona))) return false;
+
+      if (!inRange(r.tmh, _tmhMin, _tmhMax)) return false;
+      if (!inRange(r.au_gr_ton, _auMin, _auMax)) return false;
+      if (!inRange(r.cu_pct, _cuMin, _cuMax)) return false;
+      if (!inRange(r.rec_pct, _recMin, _recMax)) return false;
+      if (!inRange(r.naoh_kg_t, _naohMin, _naohMax)) return false;
+      if (!inRange(r.nacn_kg_t, _nacnMin, _nacnMax)) return false;
+
+      return true;
+    });
+  }, [rows, zonesSel, tmhMin, tmhMax, auMin, auMax, cuMin, cuMax, recMin, recMax, naohMin, naohMax, nacnMin, nacnMax]);
+
+  const mini: React.CSSProperties = {
+    padding: "10px 10px",
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,.25)",
+    background: "rgba(0,0,0,.12)",
+    color: "white",
+    outline: "none",
+    fontSize: 13,
+    width: 110,
+  };
+
+  const reset = () => {
+    setZonesSel(zones);
+    setTmhMin(""); setTmhMax("");
+    setAuMin(""); setAuMax("");
+    setCuMin(""); setCuMax("");
+    setRecMin(""); setRecMax("");
+    setNaohMin(""); setNaohMax("");
+    setNacnMin(""); setNacnMax("");
+  };
+
+  const th: React.CSSProperties = {
+    textAlign: "left",
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,.2)",
+    whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    background: "rgba(0,0,0,.28)",
+    backdropFilter: "blur(6px)",
+  };
+  const td: React.CSSProperties = { padding: "8px 10px", whiteSpace: "nowrap" };
+
+  return (
+    <div style={{ background: "rgba(0,0,0,.10)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, padding: 12 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+        <ZoneDropdown
+          zones={zones}
+          selected={zonesSel}
+          onToggle={(z) =>
+            setZonesSel((prev) => {
+              const has = prev.includes(z);
+              if (has) return prev.length <= 1 ? prev : prev.filter((x) => x !== z);
+              return [...prev, z];
+            })
+          }
+          onSelectAll={() => setZonesSel(zones)}
+        />
+
+        {/** TMH */}
+        <div>
+          <b style={{ fontSize: 13 }}>TMH</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={tmhMin} onChange={(e) => setTmhMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={tmhMax} onChange={(e) => setTmhMax(e.target.value)} />
+          </div>
+        </div>
+
+        {/** Au */}
+        <div>
+          <b style={{ fontSize: 13 }}>Au (g/t)</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={auMin} onChange={(e) => setAuMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={auMax} onChange={(e) => setAuMax(e.target.value)} />
+          </div>
+        </div>
+
+        {/** Cu */}
+        <div>
+          <b style={{ fontSize: 13 }}>Cu (%)</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={cuMin} onChange={(e) => setCuMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={cuMax} onChange={(e) => setCuMax(e.target.value)} />
+          </div>
+        </div>
+
+        {/** Rec */}
+        <div>
+          <b style={{ fontSize: 13 }}>Rec (%)</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={recMin} onChange={(e) => setRecMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={recMax} onChange={(e) => setRecMax(e.target.value)} />
+          </div>
+        </div>
+
+        {/** NaOH */}
+        <div>
+          <b style={{ fontSize: 13 }}>NaOH (kg/t)</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={naohMin} onChange={(e) => setNaohMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={naohMax} onChange={(e) => setNaohMax(e.target.value)} />
+          </div>
+        </div>
+
+        {/** NaCN */}
+        <div>
+          <b style={{ fontSize: 13 }}>NaCN (kg/t)</b>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input style={mini} placeholder="min" value={nacnMin} onChange={(e) => setNacnMin(e.target.value)} />
+            <input style={mini} placeholder="max" value={nacnMax} onChange={(e) => setNacnMax(e.target.value)} />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={reset}
+          style={{
+            padding: "10px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,.25)",
+            background: "rgba(255,255,255,.10)",
+            color: "white",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          Limpiar
+        </button>
+
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,.75)" }}>
+          Mostrando <b>{filtered.length}</b> / {rows.length}
+        </div>
+      </div>
+
+      <div style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,.25)", overflow: "auto", maxHeight: 520, background: "rgba(0,0,0,.10)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={th}>#</th>
+              <th style={th}>Código</th>
+              <th style={th}>Zona</th>
+              <th style={th}>TMH</th>
+              <th style={th}>Au (g/t)</th>
+              <th style={th}>Cu (%)</th>
+              <th style={th}>Rec (%)</th>
+              <th style={th}>NaOH (kg/t)</th>
+              <th style={th}>NaCN (kg/t)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={9} style={{ padding: 10, color: "rgba(255,255,255,.75)" }}>
+                  Cargando...
+                </td>
+              </tr>
+            )}
+
+            {filtered.map((r, i) => (
+              <tr key={r._k || `${i}`} style={{ borderBottom: "1px solid rgba(255,255,255,.08)" }}>
+                <td style={td}>{i + 1}</td>
+                <td style={td}>{r.codigo ?? ""}</td>
+                <td style={td}>{r.zona ?? ""}</td>
+                <td style={td}>{fmt(r.tmh, 2)}</td>
+                <td style={td}>{fmt(r.au_gr_ton, 2)}</td>
+                <td style={td}>{fmt(r.cu_pct, 2)}</td>
+                <td style={td}>{fmt(r.rec_pct, 2)}</td>
+                <td style={td}>{fmt(r.naoh_kg_t, 2)}</td>
+                <td style={td}>{fmt(r.nacn_kg_t, 2)}</td>
+              </tr>
+            ))}
+
+            {!loading && filtered.length === 0 && (
+              <tr>
+                <td colSpan={9} style={{ padding: 10, color: "rgba(255,255,255,.75)" }}>
+                  Sin filas para esos filtros.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
 export default function Home() {
   const [authorized, setAuthorized] = useState(false);
   const [input, setInput] = useState("");
@@ -1188,6 +1432,11 @@ export default function Home() {
   const [u1, setU1] = useState<LotRow[]>([]);
   const [u2, setU2] = useState<LotRow[]>([]);
   const [u3, setU3] = useState<LotRow[]>([]);
+  // ===== UNIVERSO LOTES (reemplaza Power BI) =====
+  const [uniRows, setUniRows] = useState<LotRow[]>([]);
+  const [uniLoading, setUniLoading] = useState(false);
+  const [uniErr, setUniErr] = useState("");
+
 
 
   // ✅ selection per view (default all true, can deselect)
@@ -1521,15 +1770,18 @@ if (toPileCode === 0) {
     setLoadError("");
 
     try {
-      const [a, b, c, uA, uB, uC] = await Promise.all([
-        fetch("/api/pilas?which=1", { cache: "no-store" }),
-        fetch("/api/pilas?which=2", { cache: "no-store" }),
-        fetch("/api/pilas?which=3", { cache: "no-store" }),
+      const [a, b, c, uA, uB, uC, uUni] = await Promise.all([
+  fetch("/api/pilas?which=1", { cache: "no-store" }),
+  fetch("/api/pilas?which=2", { cache: "no-store" }),
+  fetch("/api/pilas?which=3", { cache: "no-store" }),
 
-        fetch("/api/unused?which=1", { cache: "no-store" }),
-        fetch("/api/unused?which=2", { cache: "no-store" }),
-        fetch("/api/unused?which=3", { cache: "no-store" }),
-      ]);
+  fetch("/api/unused?which=1", { cache: "no-store" }),
+  fetch("/api/unused?which=2", { cache: "no-store" }),
+  fetch("/api/unused?which=3", { cache: "no-store" }),
+
+  fetch("/api/lotes", { cache: "no-store" }), // ✅ universo
+]);
+
 
 
       const ja = await a.json().catch(() => ({}));
@@ -1539,11 +1791,25 @@ if (toPileCode === 0) {
       const juA = await uA.json().catch(() => ({}));
       const juB = await uB.json().catch(() => ({}));
       const juC = await uC.json().catch(() => ({}));
-
+      const jUni = await uUni.json().catch(() => ({}));
 
       if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
       if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
       if (!c.ok) throw new Error(jc?.error || "Error cargando resultado 3");
+
+      setUniLoading(true);
+setUniErr("");
+try {
+  if (!uUni.ok) throw new Error(jUni?.error || "Error cargando universo");
+  const uni = addKeysToRows("1", Array.isArray(jUni?.rows) ? jUni.rows : []);
+  setUniRows(uni);
+} catch (e: any) {
+  setUniRows([]);
+  setUniErr(e?.message || "Error");
+} finally {
+  setUniLoading(false);
+}
+
 
       const rows1 = addKeysToRows("1", Array.isArray(ja?.rows) ? ja.rows : []);
       const rows2 = addKeysToRows("2", Array.isArray(jb?.rows) ? jb.rows : []);
@@ -2529,47 +2795,28 @@ setSelU((prev) => ({
         </div>
       </div>
 
-      {/* Universo de Lotes (Power BI) */}
+      {/* Universo de Lotes (Tabla) */}
       <section
-        style={{
-          background: "#004F86",
-          padding: 12,
-          borderRadius: 10,
-          border: "1px solid rgba(255,255,255,.12)",
-          marginBottom: 14,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Universo de Lotes (Control de Minerales)</h2>
+  style={{
+    background: "#004F86",
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,.12)",
+    marginBottom: 14,
+  }}
+>
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <h2 style={{ margin: 0, fontSize: 18 }}>Universo de Lotes (Control de Minerales)</h2>
+    <div style={{ fontSize: 12, color: "rgba(255,255,255,.75)" }}>
+      {uniLoading ? "Cargando..." : `Filas: ${uniRows.length}`}
+      {uniErr ? <span style={{ color: "#FFD6D6" }}> — ❌ {uniErr}</span> : null}
+    </div>
+  </div>
 
-          <a
-            href={PBI_LOTES_URL}
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "#A7D8FF", fontWeight: 800, textDecoration: "underline" }}
-            title="Abrir en nueva pestaña"
-          >
-            Abrir en Power BI
-          </a>
-        </div>
+  <div style={{ height: 10 }} />
 
-        <div style={{ height: 10 }} />
-
-        <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,.15)" }}>
-          <iframe
-            src={PBI_LOTES_URL}
-            title="Control de Minerales - Lotes Disponibles"
-            width="100%"
-            height={520}
-            style={{ border: 0, display: "block", background: "white" }}
-            allowFullScreen
-          />
-        </div>
-
-        <div style={{ marginTop: 8, fontSize: 12, color: "rgba(255,255,255,.70)" }}>
-          Usa los filtros del reporte para validar el universo de lotes disponible.
-        </div>
-      </section>
+  <UniverseTable rows={uniRows} loading={uniLoading} />
+</section>
 
       {/* Panel de parámetros + botón Calcular */}
       <section

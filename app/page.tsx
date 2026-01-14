@@ -481,6 +481,9 @@ function DataTable({
   onToggle,
   onSetMany,
 
+  // ✅ highlight movidos
+  originByKey,
+
   // ✅ DnD
   dndEnabled,
   viewKey,
@@ -493,12 +496,16 @@ function DataTable({
   onToggle: (rowKey: string) => void;
   onSetMany: (rowKeys: string[], value: boolean) => void;
 
+  // ✅ highlight movidos
+  originByKey?: Record<string, { view: ViewKey; pile_code: number; pile_type: PileType }>;
+
   dndEnabled?: boolean;
   viewKey?: ViewKey;
   pileCode?: number;
   pileType?: PileType;
   onMoveRow?: (args: { view: ViewKey; rowKey: string; toPileCode: number; toPileType: PileType }) => void;
 }) {
+
   type SortDir = "asc" | "desc";
   const [sort, setSort] = useState<{ key: ColKey; dir: SortDir } | null>(null);
 
@@ -701,6 +708,13 @@ function DataTable({
           {sortedRows.map((r, i) => {
             const k = r._k || `${i}`;
             const isSel = selected[k] !== false; // default true
+            const org = originByKey?.[k];
+const moved =
+  !!org &&
+  !!viewKey &&
+  org.view === viewKey &&
+  (org.pile_code !== Number(pileCode ?? 0) || org.pile_type !== ((pileType ?? "varios") as PileType));
+
 
             return (
               <tr
@@ -715,10 +729,14 @@ function DataTable({
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 style={{
-                  borderBottom: "1px solid rgba(255,255,255,.08)",
-                  opacity: isSel ? 1 : 0.45,
-                  cursor: dndEnabled ? "grab" : "default",
-                }}
+  borderBottom: "1px solid rgba(255,255,255,.08)",
+  opacity: isSel ? 1 : 0.45,
+  cursor: dndEnabled ? "grab" : "default",
+
+  background: moved ? "rgba(0, 150, 94, 0.20)" : "transparent",
+  borderLeft: moved ? "4px solid #00965E" : "4px solid transparent",
+}}
+
                 title={dndEnabled ? "Arrastra este lote a otra pila" : undefined}
               >
                 <td style={tdStyle}>
@@ -1810,6 +1828,11 @@ const [selU, setSelU] = useState<Record<ViewKey, SelectedMap>>({
   "4": {},
 });
 
+// ✅ origen por lote (para resaltar movidos)
+const [originByKey, setOriginByKey] = useState<
+  Record<string, { view: ViewKey; pile_code: number; pile_type: PileType }>
+>({});
+
 // ✅ slots de pilas para que no desaparezcan al quedar vacías
 const [pileSlots, setPileSlots] = useState<
   Record<ViewKey, Array<{ pile_code: number; pile_type: PileType }>>
@@ -2209,6 +2232,27 @@ setPileSlots((prev) => ({
       setU2(unused2);
       setU3(unused3);
 
+      // ✅ snapshot de origen (pilas + no usados) por view 1/2/3
+const origin: Record<string, { view: ViewKey; pile_code: number; pile_type: PileType }> = {};
+
+const addOrigin = (v: ViewKey, rows: LotRow[]) => {
+  for (const r of rows) {
+    if (!r._k) continue;
+    origin[r._k] = {
+      view: v,
+      pile_code: Number(r.pile_code ?? 0),
+      pile_type: (r.pile_type ?? "varios") as PileType,
+    };
+  }
+};
+
+addOrigin("1", [...rows1, ...unused1]);
+addOrigin("2", [...rows2, ...unused2]);
+addOrigin("3", [...rows3, ...unused3]);
+
+setOriginByKey(origin);
+
+
       // ✅ reset selección "No usados" a todo true cuando recargas
 setSelU((prev) => ({
   ...prev,
@@ -2254,6 +2298,8 @@ setSelU((prev) => ({
       setU3([]);
 
       setSel({ "1": {}, "2": {}, "3": {}, "4": {} });
+      setOriginByKey({});
+
     } finally {
       setLoading(false);
     }
@@ -3407,6 +3453,7 @@ setSelU((prev) => ({
           selected={sel[view] ?? {}}
           onToggle={(k) => toggleRowSelection(view, k)}
           onSetMany={(keys, v) => setManySelection(view, keys, v)}
+          originByKey={originByKey}
           dndEnabled={view === "1" || view === "2" || view === "3"}
           viewKey={view}
           pileCode={pile_code}
@@ -3439,6 +3486,8 @@ setSelU((prev) => ({
   selected={selU[view] ?? {}}
   onToggle={(k) => toggleRowSelectionUnused(view, k)}
   onSetMany={(keys, v) => setManySelectionUnused(view, keys, v)}
+
+  originByKey={originByKey}
 
   // ✅ ahora también en view 1 si quieres DnD ahí
   dndEnabled={view === "1" || view === "2" || view === "3"}

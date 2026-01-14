@@ -123,6 +123,43 @@ const COLS = [
   "rec_pct",
 ] as const;
 
+type ColKey = (typeof COLS)[number];
+const COL_LABEL: Record<ColKey, string> = {
+  sel: "Sel",
+  nro: "#",
+  codigo: "Código",
+  zona: "Zona",
+  tmh: "TMH",
+  humedad_pct: "Humedad (%)",
+  tms: "TMS",
+  au_gr_ton: "Au (g/t)",
+  au_fino: "Au fino (g)",
+  ag_gr_ton: "Ag (g/t)",
+  ag_fino: "Ag fino (g)",
+  cu_pct: "Cu (%)",
+  nacn_kg_t: "NaCN (kg/t)",
+  naoh_kg_t: "NaOH (kg/t)",
+  rec_pct: "Rec (%)",
+};
+
+// ✅ SOLO Universo (muestra meta)
+const COLS_UNI = [
+  ...COLS,
+  "id",
+  "loaded_at",
+  "created_at",
+] as const;
+
+type ColKeyUni = (typeof COLS_UNI)[number];
+
+const COL_LABEL_UNI: Record<ColKeyUni, string> = {
+  ...(COL_LABEL as any),
+  id: "ID",
+  loaded_at: "Loaded at",
+  created_at: "Created at",
+};
+
+
 const COLS_LOWREC = [
   "sel",
   "nro",
@@ -142,26 +179,7 @@ const COLS_LOWREC = [
   "rec_class",
 ] as const;
 
-type ColKey = (typeof COLS)[number];
 type ColKeyLow = (typeof COLS_LOWREC)[number];
-
-const COL_LABEL: Record<ColKey, string> = {
-  sel: "Sel",
-  nro: "#",
-  codigo: "Código",
-  zona: "Zona",
-  tmh: "TMH",
-  humedad_pct: "Humedad (%)",
-  tms: "TMS",
-  au_gr_ton: "Au (g/t)",
-  au_fino: "Au fino (g)",
-  ag_gr_ton: "Ag (g/t)",
-  ag_fino: "Ag fino (g)",
-  cu_pct: "Cu (%)",
-  nacn_kg_t: "NaCN (kg/t)",
-  naoh_kg_t: "NaOH (kg/t)",
-  rec_pct: "Rec (%)",
-};
 
 const COL_LABEL_LOWREC: Record<ColKeyLow, string> = {
   ...(COL_LABEL as any),
@@ -173,6 +191,273 @@ type SelectedMap = Record<string, boolean>;
 function filterSelected(rows: LotRow[], selected: SelectedMap) {
   return rows.filter((r) => !!r._k && selected[r._k] !== false); // default TRUE
 }
+
+function DataTableUniverse({
+  rows,
+  selected,
+  onToggle,
+  onSetMany,
+}: {
+  rows: LotRow[];
+  selected: SelectedMap;
+  onToggle: (rowKey: string) => void;
+  onSetMany: (rowKeys: string[], value: boolean) => void;
+}) {
+  type SortDir = "asc" | "desc";
+  const [sort, setSort] = useState<{ key: ColKeyUni; dir: SortDir } | null>(null);
+
+  const NUM_COLS = useMemo(
+    () =>
+      new Set<ColKeyUni>([
+        "id",
+        "tmh",
+        "humedad_pct",
+        "tms",
+        "au_gr_ton",
+        "au_fino",
+        "ag_gr_ton",
+        "ag_fino",
+        "cu_pct",
+        "nacn_kg_t",
+        "naoh_kg_t",
+        "rec_pct",
+      ]),
+    []
+  );
+
+  const keys = useMemo(() => rows.map((r) => r._k).filter(Boolean) as string[], [rows]);
+
+  const toggleSort = (c: ColKeyUni) => {
+    if (c === "sel" || c === "nro") return;
+    setSort((prev) => {
+      if (!prev || prev.key !== c) return { key: c, dir: "asc" };
+      return { key: c, dir: prev.dir === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sort) return rows;
+
+    const { key, dir } = sort;
+    const factor = dir === "asc" ? 1 : -1;
+
+    const withIdx = rows.map((r, idx) => ({ r, idx }));
+
+    const cmp = (a: LotRow, b: LotRow) => {
+      if (NUM_COLS.has(key)) {
+        const va = n((a as any)[key]);
+        const vb = n((b as any)[key]);
+        if (va === vb) return 0;
+        return va < vb ? -1 : 1;
+      }
+
+      const sa = String(((a as any)[key] ?? "")).toLowerCase();
+      const sb = String(((b as any)[key] ?? "")).toLowerCase();
+      if (sa === sb) return 0;
+      return sa.localeCompare(sb, "es");
+    };
+
+    withIdx.sort((A, B) => {
+      const main = cmp(A.r, B.r) * factor;
+      if (main !== 0) return main;
+      return A.idx - B.idx;
+    });
+
+    return withIdx.map((x) => x.r);
+  }, [rows, sort, NUM_COLS]);
+
+  const selectedRows = useMemo(() => filterSelected(sortedRows, selected), [sortedRows, selected]);
+
+  const selectedCount = selectedRows.length;
+  const allCount = rows.length;
+
+  const allSelected = keys.length > 0 && keys.every((k) => selected[k] !== false);
+  const noneSelected = keys.length > 0 && keys.every((k) => selected[k] === false);
+
+  const tmsSum = selectedRows.reduce((acc, r) => acc + n(r.tms), 0);
+  const tmhSum = selectedRows.reduce((acc, r) => acc + n(r.tmh), 0);
+
+  const wSum = selectedRows.reduce((acc, r) => acc + w(r), 0);
+  const wavg = (get: (r: LotRow) => number) =>
+    wSum > 0 ? selectedRows.reduce((acc, r) => acc + w(r) * get(r), 0) / wSum : 0;
+
+  const humW = wavg((r) => n(r.humedad_pct));
+  const auW = wavg((r) => n(r.au_gr_ton));
+  const agW = wavg((r) => n(r.ag_gr_ton));
+  const cuW = wavg((r) => n(r.cu_pct));
+  const nacnW = wavg((r) => n(r.nacn_kg_t));
+  const naohW = wavg((r) => n(r.naoh_kg_t));
+  const recW = wavg((r) => n(r.rec_pct));
+
+  const auFinoSum = selectedRows.reduce((acc, r) => acc + n(r.au_fino), 0);
+  const agFinoSum = selectedRows.reduce((acc, r) => acc + n(r.ag_fino), 0);
+
+  const wrapStyle: React.CSSProperties = {
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,.25)",
+    overflow: "auto",
+    maxHeight: 420,
+    background: "rgba(0,0,0,.10)",
+  };
+
+  const thStyle: React.CSSProperties = {
+    textAlign: "left",
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,.2)",
+    whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+    zIndex: 3,
+    background: "rgba(0,0,0,.28)",
+    backdropFilter: "blur(6px)",
+  };
+
+  const tdStyle: React.CSSProperties = { padding: "8px 10px", whiteSpace: "nowrap" };
+
+  const tfootTd: React.CSSProperties = {
+    padding: "10px 10px",
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    position: "sticky",
+    bottom: 0,
+    zIndex: 2,
+    background: "rgba(0,0,0,.30)",
+    backdropFilter: "blur(6px)",
+    borderTop: "1px solid rgba(255,255,255,.25)",
+  };
+
+  const sortMark = (c: ColKeyUni) => {
+    if (!sort || sort.key !== c) return "";
+    return sort.dir === "asc" ? " ▲" : " ▼";
+  };
+
+  return (
+    <div style={wrapStyle}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr>
+            {COLS_UNI.map((c) => {
+              if (c === "sel") {
+                return (
+                  <th key={c} style={{ ...thStyle, width: 54 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected && !noneSelected}
+                      ref={(el) => {
+                        if (!el) return;
+                        el.indeterminate = !allSelected && !noneSelected;
+                      }}
+                      onChange={(e) => onSetMany(keys, e.target.checked)}
+                      style={{ width: 16, height: 16, cursor: "pointer" }}
+                      title="Seleccionar/Deseleccionar todos"
+                    />
+                  </th>
+                );
+              }
+
+              const sortable = c !== "nro";
+              return (
+                <th
+                  key={c}
+                  style={{ ...thStyle, cursor: sortable ? "pointer" : "default", userSelect: "none" }}
+                  onClick={() => sortable && toggleSort(c)}
+                  title={sortable ? "Ordenar" : ""}
+                >
+                  {COL_LABEL_UNI[c] ?? c}
+                  {sortable ? sortMark(c) : ""}
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+
+        <tbody>
+          {sortedRows.map((r, i) => {
+            const k = r._k || `${i}`;
+            const isSel = selected[k] !== false;
+
+            return (
+              <tr key={k} style={{ borderBottom: "1px solid rgba(255,255,255,.08)", opacity: isSel ? 1 : 0.45 }}>
+                <td style={tdStyle}>
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => onToggle(k)}
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                    title="Incluir en export/sumas"
+                  />
+                </td>
+
+                <td style={tdStyle}>{i + 1}</td>
+
+                <td style={tdStyle}>{r.codigo ?? ""}</td>
+                <td style={tdStyle}>{r.zona ?? ""}</td>
+                <td style={tdStyle}>{fmt(r.tmh, 2)}</td>
+                <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.tms, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
+                <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
+                <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
+                <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
+
+                {/* ✅ meta */}
+                <td style={tdStyle}>{r.id ?? ""}</td>
+                <td style={tdStyle}>{r.loaded_at ?? ""}</td>
+                <td style={tdStyle}>{r.created_at ?? ""}</td>
+              </tr>
+            );
+          })}
+
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={COLS_UNI.length} style={{ padding: "10px", color: "rgba(255,255,255,.75)" }}>
+                Sin datos.
+              </td>
+            </tr>
+          )}
+        </tbody>
+
+        {rows.length > 0 && (
+          <tfoot>
+            <tr>
+              <td style={tfootTd} />
+              <td style={tfootTd} />
+              <td style={tfootTd}>SUBTOTAL</td>
+              <td style={{ ...tfootTd, fontWeight: 600, color: "rgba(255,255,255,.85)" }}>
+                ({selectedCount} sel / {allCount})
+              </td>
+
+              <td style={tfootTd}>{fmt(tmhSum, 2)}</td>
+              <td style={tfootTd}>{fmt(humW, 2)}</td>
+              <td style={tfootTd}>{fmt(tmsSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(auW, 2)}</td>
+              <td style={tfootTd}>{fmt(auFinoSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(agW, 2)}</td>
+              <td style={tfootTd}>{fmt(agFinoSum, 2)}</td>
+
+              <td style={tfootTd}>{fmt(cuW, 2)}</td>
+              <td style={tfootTd}>{fmt(nacnW, 2)}</td>
+              <td style={tfootTd}>{fmt(naohW, 2)}</td>
+              <td style={tfootTd}>{fmt(recW, 2)}</td>
+
+              {/* ✅ meta (sin subtotal) */}
+              <td style={tfootTd} />
+              <td style={tfootTd} />
+              <td style={tfootTd} />
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
 
 function DataTable({
   rows,
@@ -1490,13 +1775,13 @@ useEffect(() => {
         </div>
       </div>
 
-      <DataTable
+      <DataTableUniverse
   rows={filtered}
   selected={selUni}
   onToggle={toggleUni}
   onSetMany={setManyUni}
-  dndEnabled={false}
 />
+
 
     </div>
   );

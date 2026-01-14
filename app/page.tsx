@@ -1185,6 +1185,10 @@ export default function Home() {
   const [r2, setR2] = useState<LotRow[]>([]);
   const [r3, setR3] = useState<LotRow[]>([]);
   const [r4, setR4] = useState<LotRow[]>([]);
+  const [u1, setU1] = useState<LotRow[]>([]);
+  const [u2, setU2] = useState<LotRow[]>([]);
+  const [u3, setU3] = useState<LotRow[]>([]);
+
 
   // ✅ selection per view (default all true, can deselect)
   const [sel, setSel] = useState<Record<ViewKey, SelectedMap>>({
@@ -1193,6 +1197,15 @@ export default function Home() {
     "3": {},
     "4": {},
   });
+
+  // ✅ selección para "No usados" (default todo true)
+const [selU, setSelU] = useState<Record<ViewKey, SelectedMap>>({
+  "1": {},
+  "2": {},
+  "3": {},
+  "4": {},
+});
+
 
   const [view, setView] = useState<ViewKey>("1");
 
@@ -1260,20 +1273,91 @@ export default function Home() {
     });
   }
 
+  function toggleRowSelectionUnused(viewKey: ViewKey, rowKey: string) {
+  setSelU((prev) => {
+    const cur = prev[viewKey] ?? {};
+    const nextVal = cur[rowKey] === false ? true : false; // default true -> false
+    return { ...prev, [viewKey]: { ...cur, [rowKey]: nextVal } };
+  });
+}
+
+function setManySelectionUnused(viewKey: ViewKey, rowKeys: string[], value: boolean) {
+  setSelU((prev) => {
+    const cur = { ...(prev[viewKey] ?? {}) };
+    for (const k of rowKeys) cur[k] = value;
+    return { ...prev, [viewKey]: cur };
+  });
+}
+
+
   // ✅ mover lote entre pilas (solo view 2/3)
   function moveRowBetweenPiles(args: { view: ViewKey; rowKey: string; toPileCode: number; toPileType: PileType }) {
-    const { view, rowKey, toPileCode, toPileType } = args;
+  const { view, rowKey, toPileCode, toPileType } = args;
 
-    if (view === "2") {
-      setR2((prev) => prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r)));
-      return;
-    }
+  if (view === "2") {
+    // 1) si estaba en r2 -> mover dentro de r2
+    setR2((prev) => {
+      const exists = prev.some((r) => r._k === rowKey);
+      if (!exists) return prev;
+      return prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r));
+    });
 
-    if (view === "3") {
-      setR3((prev) => prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r)));
-      return;
-    }
+    // 2) si estaba en u2 -> sacarlo de u2 y meterlo a r2
+    setU2((prevU) => {
+      const idx = prevU.findIndex((r) => r._k === rowKey);
+      if (idx === -1) return prevU;
+
+      const row = prevU[idx];
+      const nextU = prevU.filter((r) => r._k !== rowKey);
+
+      setR2((prevR) => [...prevR, { ...row, pile_code: toPileCode, pile_type: toPileType }]);
+
+      // selección: en pilas lo dejamos seleccionado; en no usados ya no aplica
+      setSel((s) => ({ ...s, "2": { ...(s["2"] ?? {}), [rowKey]: true } }));
+      setSelU((su) => {
+        const m = { ...(su["2"] ?? {}) };
+        delete m[rowKey];
+        return { ...su, "2": m };
+      });
+
+      return nextU;
+    });
+
+    return;
   }
+
+  if (view === "3") {
+    // 1) si estaba en r3 -> mover dentro de r3
+    setR3((prev) => {
+      const exists = prev.some((r) => r._k === rowKey);
+      if (!exists) return prev;
+      return prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r));
+    });
+
+    // 2) si estaba en u3 -> sacarlo de u3 y meterlo a r3
+    setU3((prevU) => {
+      const idx = prevU.findIndex((r) => r._k === rowKey);
+      if (idx === -1) return prevU;
+
+      const row = prevU[idx];
+      const nextU = prevU.filter((r) => r._k !== rowKey);
+
+      setR3((prevR) => [...prevR, { ...row, pile_code: toPileCode, pile_type: toPileType }]);
+
+      setSel((s) => ({ ...s, "3": { ...(s["3"] ?? {}), [rowKey]: true } }));
+      setSelU((su) => {
+        const m = { ...(su["3"] ?? {}) };
+        delete m[rowKey];
+        return { ...su, "3": m };
+      });
+
+      return nextU;
+    });
+
+    return;
+  }
+}
+
 
   async function loadZones() {
     setZonesLoading(true);
@@ -1329,15 +1413,25 @@ export default function Home() {
     setLoadError("");
 
     try {
-      const [a, b, c] = await Promise.all([
+      const [a, b, c, uA, uB, uC] = await Promise.all([
         fetch("/api/pilas?which=1", { cache: "no-store" }),
         fetch("/api/pilas?which=2", { cache: "no-store" }),
         fetch("/api/pilas?which=3", { cache: "no-store" }),
+
+        fetch("/api/unused?which=1", { cache: "no-store" }),
+        fetch("/api/unused?which=2", { cache: "no-store" }),
+        fetch("/api/unused?which=3", { cache: "no-store" }),
       ]);
+
 
       const ja = await a.json().catch(() => ({}));
       const jb = await b.json().catch(() => ({}));
       const jc = await c.json().catch(() => ({}));
+
+      const juA = await uA.json().catch(() => ({}));
+      const juB = await uB.json().catch(() => ({}));
+      const juC = await uC.json().catch(() => ({}));
+
 
       if (!a.ok) throw new Error(ja?.error || "Error cargando resultado 1");
       if (!b.ok) throw new Error(jb?.error || "Error cargando resultado 2");
@@ -1350,6 +1444,24 @@ export default function Home() {
       setR1(rows1);
       setR2(rows2);
       setR3(rows3);
+
+      const unused1 = addKeysToRows("1", Array.isArray(juA?.rows) ? juA.rows : []);
+      const unused2 = addKeysToRows("2", Array.isArray(juB?.rows) ? juB.rows : []);
+      const unused3 = addKeysToRows("3", Array.isArray(juC?.rows) ? juC.rows : []);
+
+      setU1(unused1);
+      setU2(unused2);
+      setU3(unused3);
+
+      // ✅ reset selección "No usados" a todo true cuando recargas
+setSelU((prev) => ({
+  ...prev,
+  "1": buildSelectedMapAllTrue(unused1),
+  "2": buildSelectedMapAllTrue(unused2),
+  "3": buildSelectedMapAllTrue(unused3),
+}));
+
+
 
       // ✅ reset selección a "todo seleccionado" cuando recargas
       setSel((prev) => ({
@@ -1381,6 +1493,10 @@ export default function Home() {
       setR2([]);
       setR3([]);
       setR4([]);
+      setU1([]);
+      setU2([]);
+      setU3([]);
+
       setSel({ "1": {}, "2": {}, "3": {}, "4": {} });
     } finally {
       setLoading(false);
@@ -1459,6 +1575,7 @@ export default function Home() {
 
   const current = view === "1" ? g1 : view === "2" ? g2 : view === "3" ? g3 : [];
   const flatCurrentRows = view === "1" ? r1 : view === "2" ? r2 : view === "3" ? r3 : r4;
+  const flatUnusedRows = view === "1" ? u1 : view === "2" ? u2 : view === "3" ? u3 : [];
   const flatSelectedRows = useMemo(() => filterSelected(flatCurrentRows, sel[view] ?? {}), [flatCurrentRows, sel, view]);
 
   const viewTitle =
@@ -2416,6 +2533,43 @@ export default function Home() {
             );
           })}
 
+        {view !== "4" && (
+  <div
+    style={{
+      marginTop: 14,
+      background: "#004F86",
+      padding: 12,
+      borderRadius: 10,
+      border: "1px solid rgba(255,255,255,.12)",
+    }}
+  >
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+      <b>Lotes no usados (vs {viewTitle})</b>
+      <span style={{ color: "rgba(255,255,255,.85)" }}>({flatUnusedRows.length} lotes)</span>
+    </div>
+
+    <DataTable
+  rows={flatUnusedRows}
+  selected={selU[view] ?? {}}
+  onToggle={(k) => toggleRowSelectionUnused(view, k)}
+  onSetMany={(keys, v) => setManySelectionUnused(view, keys, v)}
+
+  // ✅ drag source SOLO en vista 2/3
+  dndEnabled={view === "2" || view === "3"}
+  viewKey={view}
+
+  // ✅ estos 2 son para que el drag payload tenga "fromPile"
+  // no afecta agrupación; solo identifica el origen
+  pileCode={0}
+  pileType={"varios"}
+
+  // ✅ No necesitamos drop aquí
+/>
+
+  </div>
+)}
+
+        
         {view !== "4" && current.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
         {view === "4" && r4.length === 0 && <p style={{ color: "rgba(255,255,255,.85)" }}>Sin datos.</p>}
       </section>

@@ -1294,7 +1294,90 @@ function setManySelectionUnused(viewKey: ViewKey, rowKeys: string[], value: bool
   function moveRowBetweenPiles(args: { view: ViewKey; rowKey: string; toPileCode: number; toPileType: PileType }) {
   const { view, rowKey, toPileCode, toPileType } = args;
 
+    if (view === "1") {
+    // ✅ DESTINO: NO USADOS (pileCode=0)
+    if (toPileCode === 0) {
+      setR1((prevR) => {
+        const row = prevR.find((r) => r._k === rowKey);
+        if (!row) return prevR;
+
+        const nextR = prevR.filter((r) => r._k !== rowKey);
+
+        // meter a no usados
+        setU1((prevU) => [...prevU, { ...row, pile_code: 0, pile_type: "varios" }]);
+
+        // selección: quitar de sel de pilas y agregar a selU
+        setSel((s) => {
+          const m = { ...(s["1"] ?? {}) };
+          delete m[rowKey];
+          return { ...s, "1": m };
+        });
+        setSelU((su) => ({ ...su, "1": { ...(su["1"] ?? {}), [rowKey]: true } }));
+
+        return nextR;
+      });
+
+      return;
+    }
+
+    // 1) si estaba en r1 -> mover dentro de r1
+    setR1((prev) => {
+      const exists = prev.some((r) => r._k === rowKey);
+      if (!exists) return prev;
+      return prev.map((r) => (r._k === rowKey ? { ...r, pile_code: toPileCode, pile_type: toPileType } : r));
+    });
+
+    // 2) si estaba en u1 -> sacarlo de u1 y meterlo a r1
+    setU1((prevU) => {
+      const idx = prevU.findIndex((r) => r._k === rowKey);
+      if (idx === -1) return prevU;
+
+      const row = prevU[idx];
+      const nextU = prevU.filter((r) => r._k !== rowKey);
+
+      setR1((prevR) => [...prevR, { ...row, pile_code: toPileCode, pile_type: toPileType }]);
+
+      setSel((s) => ({ ...s, "1": { ...(s["1"] ?? {}), [rowKey]: true } }));
+      setSelU((su) => {
+        const m = { ...(su["1"] ?? {}) };
+        delete m[rowKey];
+        return { ...su, "1": m };
+      });
+
+      return nextU;
+    });
+
+    return;
+  }
+
+  
   if (view === "2") {
+    // ✅ DESTINO: NO USADOS (pileCode=0)
+if (toPileCode === 0) {
+  setR2((prevR) => {
+    const row = prevR.find((r) => r._k === rowKey);
+    if (!row) return prevR;
+
+    // sacar de pilas
+    const nextR = prevR.filter((r) => r._k !== rowKey);
+
+    // meter a no usados
+    setU2((prevU) => [...prevU, { ...row, pile_code: 0, pile_type: "varios" }]);
+
+    // selección: quitar de sel de pilas y agregar a selU
+    setSel((s) => {
+      const m = { ...(s["2"] ?? {}) };
+      delete m[rowKey];
+      return { ...s, "2": m };
+    });
+    setSelU((su) => ({ ...su, "2": { ...(su["2"] ?? {}), [rowKey]: true } }));
+
+    return nextR;
+  });
+
+  return;
+}
+
     // 1) si estaba en r2 -> mover dentro de r2
     setR2((prev) => {
       const exists = prev.some((r) => r._k === rowKey);
@@ -1327,6 +1410,29 @@ function setManySelectionUnused(viewKey: ViewKey, rowKeys: string[], value: bool
   }
 
   if (view === "3") {
+    // ✅ DESTINO: NO USADOS (pileCode=0)
+if (toPileCode === 0) {
+  setR3((prevR) => {
+    const row = prevR.find((r) => r._k === rowKey);
+    if (!row) return prevR;
+
+    const nextR = prevR.filter((r) => r._k !== rowKey);
+
+    setU3((prevU) => [...prevU, { ...row, pile_code: 0, pile_type: "varios" }]);
+
+    setSel((s) => {
+      const m = { ...(s["3"] ?? {}) };
+      delete m[rowKey];
+      return { ...s, "3": m };
+    });
+    setSelU((su) => ({ ...su, "3": { ...(su["3"] ?? {}), [rowKey]: true } }));
+
+    return nextR;
+  });
+
+  return;
+}
+
     // 1) si estaba en r3 -> mover dentro de r3
     setR3((prev) => {
       const exists = prev.some((r) => r._k === rowKey);
@@ -2523,7 +2629,7 @@ setSelU((prev) => ({
                   onToggle={(k) => toggleRowSelection(view, k)}
                   onSetMany={(keys, v) => setManySelection(view, keys, v)}
                   // ✅ habilitado solo en Resultado 2/3
-                  dndEnabled={view === "2" || view === "3"}
+                  dndEnabled={view === "1" || view === "2" || view === "3"}
                   viewKey={view}
                   pileCode={pile_code}
                   pileType={pile_type}
@@ -2554,17 +2660,18 @@ setSelU((prev) => ({
   onToggle={(k) => toggleRowSelectionUnused(view, k)}
   onSetMany={(keys, v) => setManySelectionUnused(view, keys, v)}
 
-  // ✅ drag source SOLO en vista 2/3
-  dndEnabled={view === "2" || view === "3"}
+  // ✅ ahora también en view 1 si quieres DnD ahí
+  dndEnabled={view === "1" || view === "2" || view === "3"}
   viewKey={view}
 
-  // ✅ estos 2 son para que el drag payload tenga "fromPile"
-  // no afecta agrupación; solo identifica el origen
+  // ✅ este “pile” representa el destino: NO USADOS
   pileCode={0}
   pileType={"varios"}
 
-  // ✅ No necesitamos drop aquí
+  // ✅ AHORA SÍ: vuelve drop target
+  onMoveRow={moveRowBetweenPiles}
 />
+
 
   </div>
 )}

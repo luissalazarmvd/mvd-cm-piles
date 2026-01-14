@@ -13,7 +13,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("stg_lotes_daily")
     .select(
-      "codigo,zona,tmh,humedad_pct,tms,au_gr_ton,cu_pct,rec_pct,naoh_kg_t,nacn_kg_t,loaded_at,created_at"
+      "codigo,zona,tmh,humedad_pct,tms,au_gr_ton,cu_pct,rec_pct,naoh_kg_t,nacn_kg_t,loaded_at"
     )
     .order("zona", { ascending: true });
 

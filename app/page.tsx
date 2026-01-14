@@ -143,22 +143,13 @@ const COL_LABEL: Record<ColKey, string> = {
 };
 
 // ✅ SOLO Universo (muestra meta)
-const COLS_UNI = [
-  ...COLS,
-  "id",
-  "loaded_at",
-  "created_at",
-] as const;
+const COLS_UNI = [...COLS] as const;
 
 type ColKeyUni = (typeof COLS_UNI)[number];
 
 const COL_LABEL_UNI: Record<ColKeyUni, string> = {
   ...(COL_LABEL as any),
-  id: "ID",
-  loaded_at: "Loaded at",
-  created_at: "Created at",
 };
-
 
 const COLS_LOWREC = [
   "sel",
@@ -209,7 +200,6 @@ function DataTableUniverse({
   const NUM_COLS = useMemo(
     () =>
       new Set<ColKeyUni>([
-        "id",
         "tmh",
         "humedad_pct",
         "tms",
@@ -396,18 +386,15 @@ function DataTableUniverse({
                 <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
                 <td style={tdStyle}>{fmt(r.tms, 2)}</td>
                 <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
-                <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
-                <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
-                <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.au_fino), 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.ag_gr_ton), 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.ag_fino), 2)}</td>
                 <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
                 <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
                 <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>
                 <td style={tdStyle}>{fmt(r.rec_pct, 2)}</td>
 
                 {/* ✅ meta */}
-                <td style={tdStyle}>{r.id ?? ""}</td>
-                <td style={tdStyle}>{r.loaded_at ?? ""}</td>
-                <td style={tdStyle}>{r.created_at ?? ""}</td>
               </tr>
             );
           })}
@@ -447,9 +434,6 @@ function DataTableUniverse({
               <td style={tfootTd}>{fmt(recW, 2)}</td>
 
               {/* ✅ meta (sin subtotal) */}
-              <td style={tfootTd} />
-              <td style={tfootTd} />
-              <td style={tfootTd} />
             </tr>
           </tfoot>
         )}
@@ -724,9 +708,9 @@ function DataTable({
                 <td style={tdStyle}>{fmt(r.humedad_pct, 2)}</td>
                 <td style={tdStyle}>{fmt(r.tms, 2)}</td>
                 <td style={tdStyle}>{fmt(r.au_gr_ton, 2)}</td>
-                <td style={tdStyle}>{fmt(r.au_fino, 2)}</td>
-                <td style={tdStyle}>{fmt(r.ag_gr_ton, 2)}</td>
-                <td style={tdStyle}>{fmt(r.ag_fino, 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.au_fino), 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.ag_gr_ton), 2)}</td>
+                <td style={tdStyle}>{fmt(n(r.ag_fino), 2)}</td>
                 <td style={tdStyle}>{fmt(r.cu_pct, 2)}</td>
                 <td style={tdStyle}>{fmt(r.nacn_kg_t, 2)}</td>
                 <td style={tdStyle}>{fmt(r.naoh_kg_t, 2)}</td>

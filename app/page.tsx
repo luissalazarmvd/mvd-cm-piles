@@ -1244,10 +1244,92 @@ const [tmhMin, setTmhMin] = useState("");
   const [nacnMin, setNacnMin] = useState("");
   const [nacnMax, setNacnMax] = useState("");
 
-  const num = (s: string) => {
-    const v = Number((s ?? "").trim());
+  // ✅ helpers: string para input (sin comas)
+const sFixed = (v?: number, d = 2) => (v == null ? "" : Number(v).toFixed(d));
+
+// ✅ min/max reales por campo (ignora null/""/NaN)
+const ranges = useMemo(() => {
+  const toNumOpt = (x: any): number | undefined => {
+    if (x === null || x === undefined || x === "") return undefined;
+    const v = typeof x === "number" ? x : Number(String(x).replace(/,/g, ""));
     return Number.isFinite(v) ? v : undefined;
   };
+
+  const mm = (get: (r: LotRow) => any) => {
+    let min = Infinity;
+    let max = -Infinity;
+
+    for (const r of rows ?? []) {
+      const v = toNumOpt(get(r));
+      if (v == null) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+
+    if (min === Infinity || max === -Infinity) {
+      return { min: undefined, max: undefined, minInput: "", maxInput: "", minHint: "", maxHint: "" };
+    }
+
+    return {
+      min,
+      max,
+      minInput: sFixed(min, 2),
+      maxInput: sFixed(max, 2),
+      minHint: fmt(min, 2), // ✅ hint con comas
+      maxHint: fmt(max, 2),
+    };
+  };
+
+  return {
+    tmh: mm((r) => r.tmh),
+    au: mm((r) => r.au_gr_ton),
+    cu: mm((r) => r.cu_pct),
+    rec: mm((r) => r.rec_pct),
+    naoh: mm((r) => r.naoh_kg_t),
+    nacn: mm((r) => r.nacn_kg_t),
+  };
+}, [rows]);
+
+// ✅ init: si todo está vacío, setea defaults min/max reales
+useEffect(() => {
+  if (!rows || rows.length === 0) return;
+
+  const allEmpty = [
+    tmhMin, tmhMax, auMin, auMax, cuMin, cuMax,
+    recMin, recMax, naohMin, naohMax, nacnMin, nacnMax,
+  ].every((x) => (x ?? "").trim() === "");
+
+  if (!allEmpty) return;
+
+  setTmhMin(ranges.tmh.minInput);
+  setTmhMax(ranges.tmh.maxInput);
+
+  setAuMin(ranges.au.minInput);
+  setAuMax(ranges.au.maxInput);
+
+  setCuMin(ranges.cu.minInput);
+  setCuMax(ranges.cu.maxInput);
+
+  setRecMin(ranges.rec.minInput);
+  setRecMax(ranges.rec.maxInput);
+
+  setNaohMin(ranges.naoh.minInput);
+  setNaohMax(ranges.naoh.maxInput);
+
+  setNacnMin(ranges.nacn.minInput);
+  setNacnMax(ranges.nacn.maxInput);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [rows, ranges]);
+
+
+  const num = (s: string) => {
+  const t = (s ?? "").trim();
+  if (!t) return undefined;              // ✅ vacío => undefined
+  const cleaned = t.replace(/,/g, "");   // ✅ por si pegan con comas
+  const v = Number(cleaned);
+  return Number.isFinite(v) ? v : undefined;
+};
+
 
   const inRange = (x: any, min?: number, max?: number) => {
     const v = n(x);
@@ -1293,14 +1375,16 @@ const [tmhMin, setTmhMin] = useState("");
   };
 
   const reset = () => {
-    setZonesSel(zones);
-    setTmhMin(""); setTmhMax("");
-    setAuMin(""); setAuMax("");
-    setCuMin(""); setCuMax("");
-    setRecMin(""); setRecMax("");
-    setNaohMin(""); setNaohMax("");
-    setNacnMin(""); setNacnMax("");
-  };
+  setZonesSel(zones);
+
+  setTmhMin(ranges.tmh.minInput); setTmhMax(ranges.tmh.maxInput);
+  setAuMin(ranges.au.minInput);   setAuMax(ranges.au.maxInput);
+  setCuMin(ranges.cu.minInput);   setCuMax(ranges.cu.maxInput);
+  setRecMin(ranges.rec.minInput); setRecMax(ranges.rec.maxInput);
+  setNaohMin(ranges.naoh.minInput); setNaohMax(ranges.naoh.maxInput);
+  setNacnMin(ranges.nacn.minInput); setNacnMax(ranges.nacn.maxInput);
+};
+
 
   const th: React.CSSProperties = {
     textAlign: "left",
@@ -1335,8 +1419,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>TMH</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={tmhMin} onChange={(e) => setTmhMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={tmhMax} onChange={(e) => setTmhMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.tmh.minHint || "min"} value={tmhMin} onChange={(e) => setTmhMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.tmh.maxHint || "max"} value={tmhMax} onChange={(e) => setTmhMax(e.target.value)} />
           </div>
         </div>
 
@@ -1344,8 +1428,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>Au (g/t)</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={auMin} onChange={(e) => setAuMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={auMax} onChange={(e) => setAuMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.au.minHint || "min"} value={auMin} onChange={(e) => setAuMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.au.maxHint || "max"} value={auMax} onChange={(e) => setAuMax(e.target.value)} />
           </div>
         </div>
 
@@ -1353,8 +1437,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>Cu (%)</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={cuMin} onChange={(e) => setCuMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={cuMax} onChange={(e) => setCuMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.cu.minHint || "min"} value={cuMin} onChange={(e) => setCuMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.cu.maxHint || "max"} value={cuMax} onChange={(e) => setCuMax(e.target.value)} />
           </div>
         </div>
 
@@ -1362,8 +1446,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>Rec (%)</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={recMin} onChange={(e) => setRecMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={recMax} onChange={(e) => setRecMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.rec.minHint || "min"} value={recMin} onChange={(e) => setRecMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.rec.maxHint || "max"} value={recMax} onChange={(e) => setRecMax(e.target.value)} />
           </div>
         </div>
 
@@ -1371,8 +1455,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>NaOH (kg/t)</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={naohMin} onChange={(e) => setNaohMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={naohMax} onChange={(e) => setNaohMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.naoh.minHint || "min"} value={naohMin} onChange={(e) => setNaohMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.naoh.maxHint || "max"} value={naohMax} onChange={(e) => setNaohMax(e.target.value)} />
           </div>
         </div>
 
@@ -1380,8 +1464,8 @@ const [tmhMin, setTmhMin] = useState("");
         <div>
           <b style={{ fontSize: 13 }}>NaCN (kg/t)</b>
           <div style={{ display: "flex", gap: 8 }}>
-            <input style={mini} placeholder="min" value={nacnMin} onChange={(e) => setNacnMin(e.target.value)} />
-            <input style={mini} placeholder="max" value={nacnMax} onChange={(e) => setNacnMax(e.target.value)} />
+            <input style={mini} placeholder={ranges.nacn.minHint || "min"} value={nacnMin} onChange={(e) => setNacnMin(e.target.value)} />
+            <input style={mini} placeholder={ranges.nacn.maxHint || "max"} value={nacnMax} onChange={(e) => setNacnMax(e.target.value)} />
           </div>
         </div>
 

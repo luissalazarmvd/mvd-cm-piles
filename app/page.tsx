@@ -1188,8 +1188,18 @@ function UniverseTable({
 
   const [zonesSel, setZonesSel] = useState<string[]>([]);
   useEffect(() => {
-    setZonesSel((prev) => (prev.length ? prev : zones));
-  }, [zones]);
+  setZonesSel((prev) => {
+    if (!zones || zones.length === 0) return [];
+
+    // 1) primera carga: todas
+    if (!prev || prev.length === 0) return zones;
+
+    // 2) si cambió el universo: mantener intersección; si queda vacío, volver a todas
+    const setZ = new Set(zones);
+    const kept = prev.filter((z) => setZ.has(z));
+    return kept.length > 0 ? kept : zones;
+  });
+}, [zones]);
 
   const [tmhMin, setTmhMin] = useState("");
   const [tmhMax, setTmhMax] = useState("");

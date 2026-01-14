@@ -3200,6 +3200,19 @@ setSelU((prev) => ({
   <UniverseTable rows={uniRows} loading={uniLoading} />
 </section>
 
+{/* Subtítulo: Calculadora */}
+<div
+  style={{
+    margin: "8px 0 10px 0",
+    fontSize: 18,
+    fontWeight: 900,
+    letterSpacing: 0.2,
+  }}
+>
+  Calculadora:
+</div>
+
+
       {/* Panel de parámetros + botón Calcular */}
       <section
         style={{

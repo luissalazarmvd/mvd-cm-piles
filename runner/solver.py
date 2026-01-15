@@ -1508,11 +1508,22 @@ def solve(
     pile_idx = 1
     seed_batch_base = int(params["seed_batch_base"])
 
-    # SPEED: filtra con _cod (ya existe)
+    MAX_SEED_TRIES = 6  # prueba 6 seeds por pila antes de rendirte
+
     while True:
-        p = build_batch(remaining, params, seed=seed_batch_base + pile_idx)
+        p = pd.DataFrame()
+
+        # 🔁 reintentos con seeds distintos
+        for t in range(MAX_SEED_TRIES):
+            seed_try = seed_batch_base + pile_idx + (t * 1000)
+            p_try = build_batch(remaining, params, seed=seed_try)
+            if p_try is not None and not p_try.empty:
+                p = p_try
+                break
+
         if p.empty:
             break
+
         p = p.copy()
         p["pile_code"] = pile_idx
         batch_piles.append(p)

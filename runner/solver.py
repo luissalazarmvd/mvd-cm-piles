@@ -1502,18 +1502,32 @@ def solve(
     if not p1.empty:
         p1["pile_code"] = 1
 
-    # OUTPUT 2: N pilas batch
+    # =========================
+    # OUTPUT 2: N pilas batch (OPTIMIZADO)
+    # =========================
     remaining = df.copy()
-    batch_piles = []
+    batch_piles: List[pd.DataFrame] = []
     pile_idx = 1
     seed_batch_base = int(params["seed_batch_base"])
 
-    MAX_SEED_TRIES = 6  # prueba 6 seeds por pila antes de rendirte
+    bat_tms_min = float(params.get("bat_tms_min", 0.0) or 0.0)
+
+    MAX_SEED_TRIES = 6  # igual que antes
+
+    # ✅ cache de TMS restante para cortar temprano
+    remaining_tms_sum = float(remaining["tms"].fillna(0).sum())
 
     while True:
+        # ✅ corte temprano: ya no alcanza para un batch
+        if remaining_tms_sum < bat_tms_min - 1e-9:
+            break
+        if remaining is None or remaining.empty:
+            break
+
         p = pd.DataFrame()
 
         # 🔁 reintentos con seeds distintos
+        # (mismo comportamiento: si un seed falla, pruebas otros; si todos fallan, cortas)
         for t in range(MAX_SEED_TRIES):
             seed_try = seed_batch_base + pile_idx + (t * 1000)
             p_try = build_batch(remaining, params, seed=seed_try)
@@ -1524,12 +1538,27 @@ def solve(
         if p.empty:
             break
 
+        # ✅ asigna código de pila
         p = p.copy()
         p["pile_code"] = pile_idx
         batch_piles.append(p)
 
-        used_codes = set(p.get("_cod", p["codigo"].astype(str)).tolist())
-        remaining = remaining[~remaining["_cod"].isin(used_codes)].copy()
+        # ✅ usar _cod (ya existe) para quitar usados rápido y sin astype/sets
+        if "_cod" in p.columns and p["_cod"].notna().any():
+            used_codes = p["_cod"].to_numpy(object, copy=False)
+        else:
+            used_codes = p["codigo"].astype(str).to_numpy(object, copy=False)
+
+        # ✅ filtra remaining por _cod
+        # (pandas isin ya usa hash internamente; pasar array evita set() + tolist())
+        keep_mask = ~remaining["_cod"].isin(used_codes)
+        remaining = remaining.loc[keep_mask].copy()
+
+        # ✅ actualiza suma de TMS restante sin recalcular todo el DF
+        # (aprox exacta: restas lo que realmente usaste)
+        used_tms = float(p["tms"].fillna(0).sum()) if "tms" in p.columns else 0.0
+        remaining_tms_sum = max(0.0, remaining_tms_sum - used_tms)
+
         pile_idx += 1
 
     p2 = pd.concat(batch_piles, ignore_index=True) if batch_piles else pd.DataFrame()
@@ -1605,3 +1634,4 @@ def solve(
             _df.drop(columns=["_cod"], errors="ignore", inplace=True)
 
     return p1, p2, p3, rej_lowrec
+
